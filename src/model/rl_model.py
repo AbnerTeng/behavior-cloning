@@ -1,10 +1,11 @@
+## src/model/rl_model.py
+
 """
 Decision transformer model modified from minyu
 """
 from typing import Tuple
 import torch
 from torch import nn
-import torch.nn.functional as F
 from transformers import (
     DecisionTransformerConfig,
     DecisionTransformerGPT2Model
@@ -16,11 +17,10 @@ class DecisionTransformer(nn.Module):
     Decision Transformer model
     """
     def __init__(
-            self,
-            state_size: int,
-            action_size: int,
-            hidden_size: int,
-            max_len: int
+        self,
+        state_size: int,
+        action_size: int,
+        hidden_size: int,
     ) -> None:
         super().__init__()
         self.state_size = state_size
@@ -31,7 +31,7 @@ class DecisionTransformer(nn.Module):
             state_dim = self.state_size,
             act_dim = self.action_size,
             hidden_size = hidden_size,
-            max_ep_len = max_len
+            max_ep_len = 4096
         )
         self.transformer = DecisionTransformerGPT2Model(config)
 
@@ -44,19 +44,18 @@ class DecisionTransformer(nn.Module):
         self.predict_state = torch.nn.Linear(self.hidden_size, self.state_size)
         self.predict_return = torch.nn.Linear(self.hidden_size, 1)
         self.predict_action = nn.Sequential(
-            nn.Linear(self.hidden_size, config.act_dim),
-            nn.Tanh()
-            #nn.Softmax(dim=-1)
+            nn.Linear(self.hidden_size, self.action_size),
+            # nn.Sigmoid(),
         )
 
     def forward(
-            self,
-            state: torch.Tensor,
-            action: torch.Tensor,
-            return_to_go: torch.Tensor,
-            timesteps: torch.Tensor,
-            attention_mask: torch.Tensor | None = None
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        timesteps: torch.Tensor,
+        return_to_go: torch.Tensor,
+        attention_mask = None
+    ) -> Tuple:
         """
         forward pass
         """
@@ -65,15 +64,15 @@ class DecisionTransformer(nn.Module):
         if attention_mask is None:
             attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long).to(state.device)
 
-        time_embeddings = self.embed_timestep(timesteps)
-        state_embeddings = self.embed_state(state) + time_embeddings
-        action_embeddings = self.embed_action(action) + time_embeddings
-        returns_embeddings = self.embed_return(return_to_go) + time_embeddings
-
+        # time_embeddings = self.embed_timestep(timesteps.squeeze(-1))
+        time_embeddings = self.embed_timestep(timesteps)  # (batch_size, seq_length, hidden_size)
+        state_embeddings = self.embed_state(state) + time_embeddings  # (batch_size, seq_length, hidden_size)
+        action_embeddings = self.embed_action(action) + time_embeddings  # (batch_size, seq_length, hidden_size)
+        returns_embeddings = self.embed_return(return_to_go.unsqueeze(-1)) + time_embeddings  # (batch_size, seq_length, hidden_size)
         stacked_inputs = torch.stack(
             (returns_embeddings, state_embeddings, action_embeddings),
             dim=1
-        ).permute(0, 2, 1, 3).reshape(batch_size, 3 * seq_length, self.hidden_size)
+        ).permute(0, 2, 1, 3).reshape(batch_size, 3 * seq_length, self.hidden_size)  # (batch_size, 3 * seq_length, hidden_size)
         stacked_inputs = self.embed_ln(stacked_inputs)
         stacked_attention_mask = torch.stack(
             (attention_mask, attention_mask, attention_mask),
@@ -85,42 +84,59 @@ class DecisionTransformer(nn.Module):
             attention_mask = stacked_attention_mask
         )
 
-        x = transformer_outputs['last_hidden_state']
-        x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
-
+        x = transformer_outputs['last_hidden_state']  # (batch_size, 3 * seq_length, hidden_size)
+        x = x.reshape(
+            batch_size, seq_length, 3, self.hidden_size
+        ).permute(0, 2, 1, 3)  # (batch_size, 3, seq_length, hidden_size))
         return_pred = self.predict_return(x[:, 2])
         state_pred = self.predict_state(x[:, 2])
         action_pred = self.predict_action(x[:, 1])
 
-        return state_pred, action_pred, return_pred
+        return return_pred, state_pred, action_pred
 
-    def loss_fn(self, action_pred: torch.Tensor, action_target: torch.Tensor) -> torch.Tensor:
+    def loss_fn(self, action_pred, action_target):
         """
         loss function
         """
         action_pred = action_pred.reshape(-1, self.action_size)
-        action_pred = F.softmax(action_pred, dim=1)
         action_target = action_target.reshape(-1, self.action_size)
-        loss = torch.mean((action_pred - action_target) ** 2)
+        loss_fn = nn.BCEWithLogitsLoss()
+        loss = loss_fn(action_pred, action_target)
 
         return loss
 
     def get_action(
-            self,
-            state: torch.Tensor,
-            action: torch.Tensor,
-            return_to_go: torch.Tensor,
-            timesteps: torch.Tensor
+        self,
+        state,
+        action,
+        return_to_go,
+        timesteps
     ) -> float:
         """
         get action
+
+        input:
+        - d: length of the sequence
+
+        - state: (d, state_size)
+        - action: (1, action_size)
+        - timesteps: (1, 1)
+        - return_to_go: (1, 1)
+
+        output:
+        - action_pred: (n, d, action_size)
         """
         state = state.reshape(1, -1, self.state_size)
         action = action.reshape(1, -1, self.action_size)
-        return_to_go = return_to_go.reshape(1, -1, 1)
         timesteps = timesteps.reshape(1, -1)
+        # return_to_go = return_to_go.reshape(1, -1)
         attention_mask = None
-
-        _, action_pred, _ = self.forward(state, action, return_to_go, timesteps, attention_mask=attention_mask)
+        _, _, action_pred = self.forward(
+            state,
+            action,
+            timesteps,
+            return_to_go,
+            attention_mask=attention_mask
+        )
 
         return action_pred[0, -1]

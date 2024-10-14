@@ -1,4 +1,7 @@
-from argparse import ArgumentParser
+"""
+main script
+"""
+from argparse import ArgumentParser, Namespace
 import numpy as np
 from rich import print as rp
 import torch
@@ -10,17 +13,24 @@ from .create_dataset import (
     DataPreprocess,
     TradeLogDataset
 )
-from .utils.utils import load_config
+from .prepare_dataset import PrepareDataset
+from .utils.utils import (
+    load_config,
+    get_slicev2,
+    get_test_slicev2
+)
 
 
-
-def parsing_args() -> ArgumentParser:
+def parsing_args() -> Namespace:
     """
     parsing arguments
     """
     parser = ArgumentParser()
     parser.add_argument(
-        "--mode", '-m', type=str, default="train"
+        "--mode", '-m', type=str, default="test"
+    )
+    parser.add_argument(
+        "--k", type=int, default=10
     )
     return parser.parse_args()
 
@@ -34,77 +44,97 @@ if __name__ == '__main__':
     torch.cuda.manual_seed(train_config['seed_number'])
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-    # load and split data
-    action_data = np.load('/home/minyu/Financial_RL/dt/new_expert/action.npy')
-    action_data1 = np.load('/home/minyu/Financial_RL/dt/new_expert/action1.npy')
-    feat_data = np.load('/home/minyu/Financial_RL/all_feat.npy')
-    return_data = np.load('/home/minyu/Financial_RL/dt/new_expert/daily_return.npy', allow_pickle=True).astype(float)
-    return_data1 = np.load('/home/minyu/Financial_RL/dt/new_expert/daily_return1.npy', allow_pickle=True).astype(float)
-    date_data = np.load('/home/minyu/Financial_RL/all_date.npy', allow_pickle=True)
-
-    return_data[np.isnan(return_data)] = 0
-    return_data1[np.isnan(return_data1)] = 0
-
-    for idx, date in enumerate(date_data):
-        if str(train_config['start_year']) in date:
-            cut_idx = idx
-            date_data = date_data[cut_idx:]
-            feat_data = feat_data[cut_idx:]
-            return_data = return_data[cut_idx:]
-            return_data1 = return_data1[cut_idx:]
-            break
-
+    prepare_instance = PrepareDataset("trade_log/top", "sp500.csv")
+    trajectories = prepare_instance.run(p_args.k)
+    states = np.array([trajectory['state'] for trajectory in trajectories.values()])[:, :, :4]  # (k, d, 4)
+    actions = np.array([trajectory['action'] for trajectory in trajectories.values()])  # (k, d, 4)
+    returns = np.array([trajectory['return'] for trajectory in trajectories.values()])  # (k, d)
+    timesteps = np.array([trajectory['timestep'] for trajectory in trajectories.values()])  # (k, d)
     year_list = list(range(train_config['start_year'], train_config['end_year']))
     year_start_idx = {}
+
     for y in year_list:
-        for idx, date in enumerate(date_data):
+        for idx, date in enumerate(timesteps[-1]):
             if str(y) in date:
                 year_start_idx[y] = idx
                 break
 
-    # hyperparameters
-    state_size = feat_data.shape[1]
-    action_size = action_data.shape[1]
+    state_size, action_size = states.shape[-1], actions.shape[-1]
 
-    for test_year in range(train_config['start_year'] + 1, train_config['end_year']):
-        rp(f'Test year: {test_year}')
+    for test_year in range(train_config["start_year"] + 1, train_config["end_year"]):
+        rp(f"Test year: {test_year}")
         train_len = year_start_idx[test_year]
+        max_len = train_config["train"]["max_len"]
 
-        if test_year != 2022:
-            date_train, date_test = date_data[:train_len], date_data[train_len-(train_config['train']['max_len']-1):year_start_idx[test_year+1]]
-            state_train, state_test, action_train, action_test, return_train, return_test = feat_data[:-1][:train_len], feat_data[:-1][train_len-(train_config['train']['max_len']-1):year_start_idx[test_year+1]], action_data[:train_len], action_data[train_len-(train_config['train']['max_len']-1):year_start_idx[test_year+1]], return_data[:train_len], return_data[train_len-(train_config['train']['max_len']-1):year_start_idx[test_year+1]]
-            state1_train, state1_test, action1_train, action1_test, return1_train, return1_test = feat_data[:-1][:train_len], feat_data[:-1][train_len-(train_config['train']['max_len']-1):year_start_idx[test_year+1]], action_data1[:train_len], action_data1[train_len-(train_config['train']['max_len']-1):year_start_idx[test_year+1]], return_data1[:train_len], return_data1[train_len-(train_config['train']['max_len']-1):year_start_idx[test_year+1]]
+        preproc = DataPreprocess(max_len, state_size, action_size, train_config["gamma"])
+        state, action, timestep, returntogo, mask = preproc.split_data(states, actions, returns)
+        # timestep = np.expand_dims(timestep.cpu().numpy(), axis=-1)
+        t_train = get_slicev2(
+            timestep, p_args.k, max_len=max_len, start=0, end=train_len
+        )  # (tr_len * k, window_size, 1)
+        s_train = get_slicev2(
+            state, p_args.k, max_len=max_len, start=0, end=train_len
+        )  # (tr_len * k, window_size, 4)
+        a_train = get_slicev2(
+            action, p_args.k, max_len=max_len, start=0, end=train_len
+        )  # (tr_len * k, window_size, 4)
+        r_train = get_slicev2(
+            returntogo, p_args.k, max_len=max_len, start=0, end=train_len
+        )  # (tr_len * k, window_size)
 
-        else:
-            date_train, date_test = date_data[:train_len], date_data[train_len-(train_config['train']['max_len']-1):]
-            state_train, state_test, action_train, action_test, return_train, return_test = feat_data[:-1][:train_len], feat_data[:-1][train_len-(train_config['train']['max_len']-1):], action_data[:train_len], action_data[train_len-(train_config['train']['max_len']-1):], return_data[:train_len], return_data[train_len-(train_config['train']['max_len']-1):]
-            state1_train, state1_test, action1_train, action1_test, return1_train, return1_test = feat_data[:-1][:train_len], feat_data[:-1][train_len-(train_config['train']['max_len']-1):], action_data1[:train_len], action_data1[train_len-(train_config['train']['max_len']-1):], return_data1[:train_len], return_data1[train_len-(train_config['train']['max_len']-1):]
+        t_test = get_test_slicev2(
+            timestep, p_args.k, train_len, max_len, year_start_idx, test_year, year_list
+        )  # (te_len * k, window_size, 1)
+        s_test = get_test_slicev2(
+            state, p_args.k, train_len, max_len, year_start_idx, test_year, year_list
+        )
+        a_test = get_test_slicev2(
+            action, p_args.k, train_len, max_len, year_start_idx, test_year, year_list
+        )
+        r_test = get_test_slicev2(
+            returntogo, p_args.k, train_len, max_len, year_start_idx, test_year, year_list
+        )
 
-        preproc = DataPreprocess(train_config['train']['max_len'], state_size, action_size, train_config['gamma'])
-        s_train, a_train, t_train, rtg_train, mask_train = preproc.split_data(state_train, action_train, return_train)
-        s1_train, a1_train, t1_train, rtg1_train, mask1_train = preproc.split_data(state1_train, action1_train, return1_train)
-        s_train, a_train, t_train, rtg_train, mask_train = torch.cat((s_train, s1_train), axis=0), torch.cat((a_train, a1_train), axis=0), torch.cat((t_train, t1_train), axis=0), torch.cat((rtg_train, rtg1_train), axis=0), torch.cat((mask_train, mask1_train), axis=0)
-        train_dataset = TradeLogDataset(s_train, a_train, t_train, rtg_train, mask_train)
-        train_dataloader = DataLoader(train_dataset, batch_size=train_config['train']['batch_size'], shuffle=True)
+        train_dataset = TradeLogDataset(s_train, a_train, t_train, r_train, mask)
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=train_config["train"]["batch_size"] * p_args.k,
+            shuffle=True
+        )
 
         dt_model = DecisionTransformer(
             state_size,
             action_size,
-            train_config['train']['hidden_size'],
-            train_config['train']['max_len']
+            train_config['train']['hidden_size']
         ).to(DEVICE)
 
-        if test_year == train_config['start_year']+1:
-            torch.save(dt_model.state_dict(), './model_weights/original.pth')
-
-        trainer = Trainer(test_year, dt_model, train_config['train']['max_len'])
+        if test_year == train_config['start_year'] + 1:
+            torch.save(dt_model.state_dict(), 'model_weights/original.pth')
+        trainer = Trainer(test_year, dt_model, max_len)
 
         if p_args.mode == "train":
             trainer.train(train_config['train']['epochs'], train_dataloader)
 
         elif p_args.mode == "test":
-            Trainer.test(DEVICE, state_size, action_size, state_test, train_config['train']['target_return'])
+            first_20 = s_test[0]
+            single_state = [
+                s_test[p_args.k * i, -1, :].unsqueeze(0) for i in range(1, int(s_test.shape[0] / p_args.k))
+            ]
+            single_state = torch.stack(single_state).to(DEVICE)
+            single_state = torch.cat(
+                [
+                    first_20,
+                    single_state.squeeze(1)
+                ],
+                dim=0
+            )
+            trainer.test(
+                DEVICE,
+                state_size,
+                action_size,
+                single_state,
+                train_config['train']['target_return']
+            )
 
         else:
             rp('Invalid mode')
