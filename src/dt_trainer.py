@@ -8,7 +8,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from .model.rl_model import DecisionTransformer
+from .model.dt_model import DecisionTransformer
 from .utils.utils import compute_dr
 
 class Trainer:
@@ -51,7 +51,8 @@ class Trainer:
                     return_to_go_batch.float().cuda(),
                     attention_mask=mask_batch.bool().cuda()
                 )
-                loss = self.model.loss_fn(action_pred, action_batch)
+                action_target = torch.clone(action_batch).detach()
+                loss = self.model.loss_fn(action_pred, action_target)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.25)
                 optimizer.step()
@@ -120,7 +121,6 @@ class Trainer:
                     timesteps_batch
                 )
                 action_pred = F.softmax(action_pred)
-                print(action_pred)
 
                 if torch.isnan(action_pred).any() is True:
                     print(f'Nan detected at {idx}')

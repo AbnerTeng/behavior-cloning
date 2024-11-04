@@ -4,7 +4,9 @@
 Decision transformer model modified from minyu
 """
 from typing import Tuple
+
 import torch
+import torch.nn.functional as F
 from torch import nn
 from transformers import (
     DecisionTransformerConfig,
@@ -30,7 +32,7 @@ class DecisionTransformer(nn.Module):
         config = DecisionTransformerConfig(
             state_dim = self.state_size,
             act_dim = self.action_size,
-            hidden_size = hidden_size,
+            hidden_size = self.hidden_size,
             max_ep_len = 4096
         )
         self.transformer = DecisionTransformerGPT2Model(config)
@@ -41,8 +43,8 @@ class DecisionTransformer(nn.Module):
         self.embed_return = nn.Linear(1, self.hidden_size)
         self.embed_ln = nn.LayerNorm(self.hidden_size)
 
-        self.predict_state = torch.nn.Linear(self.hidden_size, self.state_size)
-        self.predict_return = torch.nn.Linear(self.hidden_size, 1)
+        self.predict_state = nn.Linear(self.hidden_size, self.state_size)
+        self.predict_return = nn.Linear(self.hidden_size, 1)
         self.predict_action = nn.Sequential(
             nn.Linear(self.hidden_size, self.action_size),
             # nn.Sigmoid(),
@@ -59,7 +61,7 @@ class DecisionTransformer(nn.Module):
         """
         forward pass
         """
-        batch_size, seq_length = state.shape[0], state.shape[1]
+        batch_size, seq_length, _ = state.shape
 
         if attention_mask is None:
             attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long).to(state.device)
@@ -94,23 +96,32 @@ class DecisionTransformer(nn.Module):
 
         return return_pred, state_pred, action_pred
 
-    def loss_fn(self, action_pred, action_target):
+    def loss_fn(
+        self,
+        action_pred: torch.Tensor,
+        action_target: torch.Tensor
+    ) -> torch.Tensor:
         """
         loss function
+
+        input:
+        - action_pred: (n, d, action_size)
+        - action_target: (n, d, action_size)
         """
-        action_pred = action_pred.reshape(-1, self.action_size)
-        action_target = action_target.reshape(-1, self.action_size)
-        loss_fn = nn.BCEWithLogitsLoss()
+        action_pred = F.softmax(action_pred, dim=-1)
+        action_pred = action_pred.permute(0, 2, 1)
+        action_target = action_target.permute(0, 2, 1)
+        loss_fn = nn.CrossEntropyLoss()
         loss = loss_fn(action_pred, action_target)
 
         return loss
 
     def get_action(
         self,
-        state,
-        action,
-        return_to_go,
-        timesteps
+        state: torch.Tensor,
+        action: torch.Tensor,
+        return_to_go: torch.Tensor,
+        timesteps: torch.Tensor
     ) -> float:
         """
         get action

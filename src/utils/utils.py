@@ -123,33 +123,55 @@ def compute_dr(
         return dr, have_position, prev_act
 
 
+def get_start_year_idx(
+    year_list: List[int],
+    timesteps: np.ndarray
+) -> Dict[int, int]:
+    """
+    Get the start index of each year
+    """
+    year_start_idx = {}
+
+    for y in year_list:
+        for idx, date in enumerate(timesteps[-1]):
+            if str(y) in date:
+                year_start_idx[y] = idx
+                break
+
+    return year_start_idx
+
+
 def get_slicev2(
-    data: Union[np.ndarray, torch.Tensor],
+    data: List[Union[np.ndarray, torch.Tensor]],
     num_strats: int,
-    max_len: int = 20,
     start: int = 0,
     end: int | None = None
-) -> Union[np.ndarray, torch.Tensor]:
+) -> List[Union[np.ndarray, torch.Tensor]]:
     """
     slice the data into length of training
 
     The training length -> first day until the specifc year (end - max_len)
     """
-    if end is not None:
-        return data[(start * num_strats): (end * num_strats), :]
+    output = []
 
-    return data[(start * num_strats):, :]
+    for d in data:
+        if end is not None:
+            return d[(start * num_strats): (end * num_strats), :]
+
+        output.append(d[(start * num_strats):, :])
+
+    return output
 
 
 def get_test_slicev2(
-    data: np.ndarray,
+    data: List[Union[np.ndarray, torch.Tensor]],
     num_strats: int,
     train_len: int,
     max_len: int,
     year_start_idx: int,
     test_year: int,
     year_list: List[str],
-) -> np.ndarray:
+) -> List[Union[np.ndarray, torch.Tensor]]:
     """
     slice the data into length of testing
 
@@ -157,4 +179,5 @@ def get_test_slicev2(
     """
     start = train_len - (max_len - 1)  # start from last 19 days of training data
     end = None if test_year == year_list[-1] else year_start_idx[test_year + 1]
-    return get_slicev2(data, num_strats, 0, start, end)
+
+    return get_slicev2(data, num_strats, start, end)

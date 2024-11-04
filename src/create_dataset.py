@@ -30,6 +30,23 @@ class TradeLogDataset(Dataset):
         )
 
 
+class EDTTradeLogDataset(Dataset):
+    """
+    Dataset of Elastic Decision Transformer trading logs
+    """
+
+    def __init__(self, *args) -> None:
+        self.data = args
+
+    def __len__(self) -> int:
+        return len(self.data[0])
+
+    def __getitem__(self, idx: int) -> Tuple:
+        return tuple(
+            d[idx] for d in self.data
+        )
+
+
 class DataPreprocess:
     """
     Preprocess class
@@ -60,6 +77,7 @@ class DataPreprocess:
     def split_data(
         self,
         state_set: np.ndarray,
+        next_state_set: np.ndarray,
         action_set: np.ndarray,
         return_set: np.ndarray,
     ) -> Tuple[torch.Tensor]:
@@ -73,6 +91,7 @@ class DataPreprocess:
 
         Args:
             state_set: np.ndarray --> full states with shape (k, d, 4)
+            next_state_set: np.ndarray --> full next states with shape (k, d, 4)
             action_set: np.ndarray --> full actions with shape (k, d, 4)
             return_set: np.ndarray --> full returns with shape (k, d)
 
@@ -80,6 +99,8 @@ class DataPreprocess:
             Tuple[torch.Tensor]: (s, a, rt, t, mask)
             s --> stacked state with shape
                 (k * (state_set.shape[1] - self.max_length+1)), self.max_length, 4)
+            ns --> stacked next state with shape
+                (k * (next_state_set.shape[1] - self.max_length+1)), self.max_length, 4)
             a --> stacked action with shape
                 (k * (state_set.shape[1] - self.max_length+1)), self.max_length, 4)
             rt --> stacked return to go with shape
@@ -90,14 +111,17 @@ class DataPreprocess:
             mask --> stacked mask with shape
                 (k * (state_set.shape[1] - self.max_length+1)), self.max_length)
         """
-        s, a, t, rt, mask = [], [], [], [], []
+        s, ns, a, t, rt, mask = [], [], [], [], [], []
 
         for start_idx in range(state_set.shape[1] - self.max_length + 1):
             state_piece = state_set[:, start_idx: start_idx + self.max_length, :]  # (k, 20, 4)
             seq_length = state_piece.shape[1]
             state_norm = min_max_norm(state_piece)
             s.append(state_norm)
-
+            next_state_piece = next_state_set[:, start_idx: start_idx + self.max_length, :]  # (k, 20, 4)
+            seq_length = next_state_piece.shape[1]
+            next_state_norm = min_max_norm(next_state_piece)
+            ns.append(next_state_norm)
             action_piece = action_set[:, start_idx: start_idx + self.max_length, :]  # (k, 20, 4)
             a.append(action_piece)
             timesteps = np.arange(self.max_length)
@@ -113,6 +137,9 @@ class DataPreprocess:
         s = torch.from_numpy(
             np.concatenate(s, axis=0)
         ).to(dtype=torch.float32, device=self.device)
+        ns = torch.from_numpy(
+            np.concatenate(ns, axis=0)
+        ).to(dtype=torch.float32, device=self.device)
         a = torch.from_numpy(
             np.concatenate(a, axis=0)
         ).to(dtype=torch.float32, device=self.device)
@@ -126,4 +153,4 @@ class DataPreprocess:
             np.concatenate(mask, axis=0)
         ).to(dtype=torch.float32, device=self.device)
 
-        return s, a, t, rtg, mask
+        return s, ns, a, t, rtg, mask

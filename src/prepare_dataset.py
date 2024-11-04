@@ -27,7 +27,8 @@ class PrepareDataset:
 
     Decision transformer input format (per trajectory)
     - action: np.array \in R^{day, 4} (long, sell, buytocover, short)
-    - state: np.array \in R^{day, 5} (open, high, low, close, volume)
+    - state: np.array \in R^{day, 4} (open, high, low, close)
+        - Volume will be considered in the future
     - return: np.array \in R^{day}
     - timestep: np.ndarray \in R^{day}
     """
@@ -81,7 +82,7 @@ class PrepareDataset:
         """
         raise NotImplementedError
 
-    def run(self, k: int = 2) -> Dict[str, Dict[str, np.ndarray]]:
+    def run(self, state_with_vol: bool, get_next_state: bool, k: int = 2) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Run the dataset preparation code, and get the top k return strategies
         """
@@ -99,10 +100,17 @@ class PrepareDataset:
 
             self.trajectories[log] = {
                 "action": action_array,
-                "state": self.state_data.drop(columns= ['Date', 'Adj Close']).to_numpy(),
+                "state": self.state_data.drop(
+                    columns=['Date', 'Adj Close', 'Volume'] if not state_with_vol else ['Date', 'Adj Close']
+                ).to_numpy(),
                 "return": return_array,
                 "timestep": self.state_data['Date'].to_numpy()
             }
+
+            if get_next_state:
+                self.trajectories[log]["next_state"] = self.state_data.drop(
+                    columns=['Date', 'Adj Close', 'Volume'] if not state_with_vol else ['Date', 'Adj Close']
+                ).shift(periods=-1).to_numpy()
 
         cum_rets = {key: value['return'].cumsum()[-1] for key, value in self.trajectories.items()}
         cum_rets = sorted(cum_rets.items(), key=lambda x: x[1], reverse=True)[:k]

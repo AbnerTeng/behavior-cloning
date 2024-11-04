@@ -7,25 +7,38 @@ from rich import print as rp
 import torch
 from torch.utils.data import DataLoader
 
-from .model.rl_model import DecisionTransformer
-from .trainer import Trainer
+from .model.dt_model import DecisionTransformer
+from .dt_trainer import Trainer
 from .create_dataset import (
     DataPreprocess,
-    TradeLogDataset
+    TradeLogDataset,
+    EDTTradeLogDataset
 )
 from .prepare_dataset import PrepareDataset
 from .utils.utils import (
     load_config,
+    get_start_year_idx,
     get_slicev2,
     get_test_slicev2
 )
 
 
-def parsing_args() -> Namespace:
+def get_args() -> Namespace:
     """
     parsing arguments
     """
     parser = ArgumentParser()
+    parser.add_argument(
+        "--state_with_vol",
+        "-sv",
+        action="store_true"
+    )
+    parser.add_argument(
+        "--model",
+        "-md",
+        type=str,
+        default="dt"
+    )
     parser.add_argument(
         "--mode", '-m', type=str, default="test"
     )
@@ -36,7 +49,7 @@ def parsing_args() -> Namespace:
 
 
 if __name__ == '__main__':
-    p_args = parsing_args()
+    p_args = get_args()
     train_config = load_config('config/train_cfg.yml')
     DEVICE = f"cuda:{train_config['device']}" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(train_config['seed_number'])
@@ -44,22 +57,24 @@ if __name__ == '__main__':
     torch.cuda.manual_seed(train_config['seed_number'])
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    prepare_instance = PrepareDataset("trade_log/top", "sp500.csv")
-    trajectories = prepare_instance.run(p_args.k)
-    states = np.array([trajectory['state'] for trajectory in trajectories.values()])[:, :, :4]  # (k, d, 4)
-    actions = np.array([trajectory['action'] for trajectory in trajectories.values()])  # (k, d, 4)
-    returns = np.array([trajectory['return'] for trajectory in trajectories.values()])  # (k, d)
-    timesteps = np.array([trajectory['timestep'] for trajectory in trajectories.values()])  # (k, d)
+    prepare_instance = PrepareDataset("trade_log/top", "env_data/sp500.csv")
+    trajectories = prepare_instance.run(p_args.state_with_vol, p_args.k)
+    new_trajectories = {}
+
+    if p_args.model == "edt":
+        keys = ['state', 'next_state', 'action', 'return', 'timestep']
+    else:
+        keys = ['state', 'action', 'return', 'timestep']
+
+    for k in keys:
+        new_trajectories[k] = np.array(
+            [trajectory[k] for trajectory in trajectories.values()]
+        )
+
     year_list = list(range(train_config['start_year'], train_config['end_year']))
-    year_start_idx = {}
-
-    for y in year_list:
-        for idx, date in enumerate(timesteps[-1]):
-            if str(y) in date:
-                year_start_idx[y] = idx
-                break
-
-    state_size, action_size = states.shape[-1], actions.shape[-1]
+    year_start_idx = get_start_year_idx(year_list, new_trajectories['timesteps'])
+    state_size = new_trajectories['state'].shape[-1]
+    action_size = new_trajectories['action'].shape[-1]
 
     for test_year in range(train_config["start_year"] + 1, train_config["end_year"]):
         rp(f"Test year: {test_year}")
@@ -67,35 +82,36 @@ if __name__ == '__main__':
         max_len = train_config["train"]["max_len"]
 
         preproc = DataPreprocess(max_len, state_size, action_size, train_config["gamma"])
-        state, action, timestep, returntogo, mask = preproc.split_data(states, actions, returns)
+        state, next_state, action, timestep, returntogo, mask = preproc.split_data(
+            new_trajectories['state'],
+            new_trajectories['next_state'],
+            new_trajectories['action'],
+            new_trajectories['return']
+        )
+
+        t_train, s_train, ns_train, a_train, r_train = get_slicev2(
+            [timestep, state, next_state, action, returntogo],
+            p_args.k,
+            start=0,
+            end=train_len
+        )
         # timestep = np.expand_dims(timestep.cpu().numpy(), axis=-1)
-        t_train = get_slicev2(
-            timestep, p_args.k, max_len=max_len, start=0, end=train_len
-        )  # (tr_len * k, window_size, 1)
-        s_train = get_slicev2(
-            state, p_args.k, max_len=max_len, start=0, end=train_len
-        )  # (tr_len * k, window_size, 4)
-        a_train = get_slicev2(
-            action, p_args.k, max_len=max_len, start=0, end=train_len
-        )  # (tr_len * k, window_size, 4)
-        r_train = get_slicev2(
-            returntogo, p_args.k, max_len=max_len, start=0, end=train_len
-        )  # (tr_len * k, window_size)
-
-        t_test = get_test_slicev2(
-            timestep, p_args.k, train_len, max_len, year_start_idx, test_year, year_list
-        )  # (te_len * k, window_size, 1)
-        s_test = get_test_slicev2(
-            state, p_args.k, train_len, max_len, year_start_idx, test_year, year_list
-        )
-        a_test = get_test_slicev2(
-            action, p_args.k, train_len, max_len, year_start_idx, test_year, year_list
-        )
-        r_test = get_test_slicev2(
-            returntogo, p_args.k, train_len, max_len, year_start_idx, test_year, year_list
+        t_test, s_test, ns_test, a_test, r_test = get_test_slicev2(
+            [timestep, state, next_state, action, returntogo],
+            p_args.k,
+            train_len,
+            max_len,
+            year_start_idx,
+            test_year,
+            year_list
         )
 
-        train_dataset = TradeLogDataset(s_train, a_train, t_train, r_train, mask)
+        if p_args.model == "edt":
+            train_dataset = EDTTradeLogDataset(s_train, ns_train, a_train, r_train, t_train, mask)
+
+        else:
+            train_dataset = TradeLogDataset(s_train, a_train, t_train, r_train, mask)
+
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=train_config["train"]["batch_size"] * p_args.k,
