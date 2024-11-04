@@ -1,0 +1,12 @@
+device: 0
+seed_number: 42
+start_year: 2011
+end_year: 2024
+gamma: 0.99
+
+train:
+  max_len: 20
+  batch_size: 64
+  hidden_size: 128
+  epochs: 200
+  target_return: 1
