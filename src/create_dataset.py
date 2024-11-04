@@ -1,7 +1,7 @@
 """
 Dataset creation module
 """
-from typing import Tuple
+from typing import Tuple, Optional
 
 import numpy as np
 import torch
@@ -77,7 +77,7 @@ class DataPreprocess:
     def split_data(
         self,
         state_set: np.ndarray,
-        next_state_set: np.ndarray,
+        next_state_set: Optional[np.ndarray],
         action_set: np.ndarray,
         return_set: np.ndarray,
     ) -> Tuple[torch.Tensor]:
@@ -118,10 +118,13 @@ class DataPreprocess:
             seq_length = state_piece.shape[1]
             state_norm = min_max_norm(state_piece)
             s.append(state_norm)
-            next_state_piece = next_state_set[:, start_idx: start_idx + self.max_length, :]  # (k, 20, 4)
-            seq_length = next_state_piece.shape[1]
-            next_state_norm = min_max_norm(next_state_piece)
-            ns.append(next_state_norm)
+
+            if next_state_set is not None:
+                next_state_piece = next_state_set[:, start_idx: start_idx + self.max_length, :]  # (k, 20, 4)
+                seq_length = next_state_piece.shape[1]
+                next_state_norm = min_max_norm(next_state_piece)
+                ns.append(next_state_norm)
+
             action_piece = action_set[:, start_idx: start_idx + self.max_length, :]  # (k, 20, 4)
             a.append(action_piece)
             timesteps = np.arange(self.max_length)
@@ -137,9 +140,12 @@ class DataPreprocess:
         s = torch.from_numpy(
             np.concatenate(s, axis=0)
         ).to(dtype=torch.float32, device=self.device)
-        ns = torch.from_numpy(
-            np.concatenate(ns, axis=0)
-        ).to(dtype=torch.float32, device=self.device)
+
+        if next_state_set is not None:
+            ns = torch.from_numpy(
+                np.concatenate(ns, axis=0)
+            ).to(dtype=torch.float32, device=self.device)
+
         a = torch.from_numpy(
             np.concatenate(a, axis=0)
         ).to(dtype=torch.float32, device=self.device)

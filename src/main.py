@@ -40,10 +40,13 @@ def get_args() -> Namespace:
         default="dt"
     )
     parser.add_argument(
-        "--mode", '-m', type=str, default="test"
+        "--mode", '-m', type=str, default="train"
     )
     parser.add_argument(
-        "--k", type=int, default=10
+        "--k", type=int, default=17
+    )
+    parser.add_argument(
+        "--expr", type=str, default="synthetic_all_rsi"
     )
     return parser.parse_args()
 
@@ -57,7 +60,7 @@ if __name__ == '__main__':
     torch.cuda.manual_seed(train_config['seed_number'])
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    prepare_instance = PrepareDataset("trade_log/top", "env_data/sp500.csv")
+    prepare_instance = PrepareDataset(f"trade_log/{p_args.expr}", "env_data/sp500.csv")
     trajectories = prepare_instance.run(p_args.state_with_vol, p_args.k)
     new_trajectories = {}
 
@@ -72,7 +75,7 @@ if __name__ == '__main__':
         )
 
     year_list = list(range(train_config['start_year'], train_config['end_year']))
-    year_start_idx = get_start_year_idx(year_list, new_trajectories['timesteps'])
+    year_start_idx = get_start_year_idx(year_list, new_trajectories['timestep'])
     state_size = new_trajectories['state'].shape[-1]
     action_size = new_trajectories['action'].shape[-1]
 
@@ -82,34 +85,50 @@ if __name__ == '__main__':
         max_len = train_config["train"]["max_len"]
 
         preproc = DataPreprocess(max_len, state_size, action_size, train_config["gamma"])
+
         state, next_state, action, timestep, returntogo, mask = preproc.split_data(
             new_trajectories['state'],
-            new_trajectories['next_state'],
+            new_trajectories['next_state'] if p_args.model == "edt" else None,
             new_trajectories['action'],
             new_trajectories['return']
         )
 
-        t_train, s_train, ns_train, a_train, r_train = get_slicev2(
-            [timestep, state, next_state, action, returntogo],
-            p_args.k,
-            start=0,
-            end=train_len
-        )
-        # timestep = np.expand_dims(timestep.cpu().numpy(), axis=-1)
-        t_test, s_test, ns_test, a_test, r_test = get_test_slicev2(
-            [timestep, state, next_state, action, returntogo],
-            p_args.k,
-            train_len,
-            max_len,
-            year_start_idx,
-            test_year,
-            year_list
-        )
-
         if p_args.model == "edt":
+            t_train, s_train, ns_train, a_train, r_train = get_slicev2(
+                [timestep, state, next_state, action, returntogo],
+                p_args.k,
+                start=0,
+                end=train_len
+            )
+            # timestep = np.expand_dims(timestep.cpu().numpy(), axis=-1)
+            t_test, s_test, ns_test, a_test, r_test = get_test_slicev2(
+                [timestep, state, next_state, action, returntogo],
+                p_args.k,
+                train_len,
+                max_len,
+                year_start_idx,
+                test_year,
+                year_list
+            )
             train_dataset = EDTTradeLogDataset(s_train, ns_train, a_train, r_train, t_train, mask)
 
         else:
+            t_train, s_train, a_train, r_train = get_slicev2(
+                [timestep, state, action, returntogo],
+                p_args.k,
+                start=0,
+                end=train_len
+            )
+            # timestep = np.expand_dims(timestep.cpu().numpy(), axis=-1)
+            t_test, s_test, a_test, r_test = get_test_slicev2(
+                [timestep, state, action, returntogo],
+                p_args.k,
+                train_len,
+                max_len,
+                year_start_idx,
+                test_year,
+                year_list
+            )
             train_dataset = TradeLogDataset(s_train, a_train, t_train, r_train, mask)
 
         train_dataloader = DataLoader(
@@ -125,11 +144,12 @@ if __name__ == '__main__':
         ).to(DEVICE)
 
         if test_year == train_config['start_year'] + 1:
-            torch.save(dt_model.state_dict(), 'model_weights/original.pth')
+            torch.save(dt_model.state_dict(), f'{p_args.expr}_model_weights/original.pth')
+
         trainer = Trainer(test_year, dt_model, max_len)
 
         if p_args.mode == "train":
-            trainer.train(train_config['train']['epochs'], train_dataloader)
+            trainer.train(train_config['train']['epochs'], train_dataloader, p_args.expr)
 
         elif p_args.mode == "test":
             first_20 = s_test[0]

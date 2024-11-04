@@ -1,3 +1,6 @@
+"""
+Search for the best action
+"""
 from typing import Optional, Tuple
 import math
 

@@ -156,9 +156,9 @@ def get_slicev2(
 
     for d in data:
         if end is not None:
-            return d[(start * num_strats): (end * num_strats), :]
-
-        output.append(d[(start * num_strats):, :])
+            output.append(d[(start * num_strats): (end * num_strats), :])
+        else:
+            output.append(d[(start * num_strats):, :])
 
     return output
 

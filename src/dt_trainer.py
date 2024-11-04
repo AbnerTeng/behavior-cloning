@@ -29,11 +29,12 @@ class Trainer:
         self,
         epochs: int,
         tr_loader: DataLoader,
+        expr_name: str
     ) -> None:
         """
         trainer
         """
-        self.model.load_state_dict(torch.load('model_weights/original.pth'))
+        self.model.load_state_dict(torch.load(f'{expr_name}_model_weights/original.pth'))
         self.model.train()
         optimizer = optim.AdamW(self.model.parameters(), lr=1e-4, weight_decay=1e-4)
 
@@ -64,7 +65,7 @@ class Trainer:
                 print(f'Epoch [{epoch+1}/{epochs}] loss = {epoch_loss}')
 
             if (epoch + 1) % 50 == 0:
-                torch.save(self.model.state_dict(), f'model_weights/{self.year}_len{self.max_len}.pth')
+                torch.save(self.model.state_dict(), f'{expr_name}_model_weights/{self.year}_len{self.max_len}.pth')
 
     def test(
         self,
