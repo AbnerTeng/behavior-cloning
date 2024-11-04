@@ -15,11 +15,11 @@ from .utils.utils import compute_dr
 from .utils.edt_utils import expectile_loss
 from .utils.return_search import (
     return_search,
-    return_search_heuristic
+    # return_search_heuristic
 )
 
 
-class Trainer:
+class EDTTrainer:
     """
     Decision transformer trainer
     """
@@ -38,6 +38,12 @@ class Trainer:
         self,
         epochs: int,
         tr_loader: DataLoader,
+        device: torch.device,
+        expr_name: str,
+        expectile: float = 0.99,
+        state_loss_weight: float = 1.0,
+        exp_loss_weight: float = 0.5,
+        ce_weight: float = 0.001
     ) -> None:
         """
         trainer
@@ -49,7 +55,7 @@ class Trainer:
             - return_to_go_batch: torch.Tensor with shape (B, T)
             - mask_batch: torch.Tensor with shape (B, T)
         """
-        self.model.load_state_dict(torch.load('model_weights/original.pth'))
+        self.model.load_state_dict(torch.load(f'{expr_name}_model_weights/original.pth'))
         self.model.train()
         optimizer = optim.AdamW(self.model.parameters(), lr=1e-4, weight_decay=1e-4)
 
@@ -58,28 +64,38 @@ class Trainer:
             total_loss = 0
 
             for data in tr_loader:
-                state_batch, action_batch, timesteps_batch, return_to_go_batch, mask_batch = data
+                state_batch, _, action_batch, timesteps_batch, return_to_go_batch, mask_batch = data
 
                 with torch.autocast(device_type="cuda", dtype=torch.float32):  # automatic mixed precision
+                    # state_pred, action_pred, return_pred, imp_return_pred, _ = self.model(
+                    #     state_batch.float().cuda(),
+                    #     action_batch.float().cuda(),
+                    #     timesteps_batch.long().cuda(),
+                    #     return_to_go_batch.float().cuda(),
+                    #     attention_mask=mask_batch.bool().cuda()
+                    # )
                     state_pred, action_pred, return_pred, imp_return_pred, _ = self.model(
-                        state_batch.float().cuda(),
-                        action_batch.float().cuda(),
-                        timesteps_batch.long().cuda(),
-                        return_to_go_batch.float().cuda(),
-                        attention_mask=mask_batch.bool().cuda()
+                        state_batch.float().to(device),
+                        action_batch.float().to(device),
+                        timesteps_batch.long().to(device),
+                        return_to_go_batch.float().to(device),
+                        attention_mask=mask_batch.bool().to(device)
                     )
                     action_target = torch.clone(action_batch).detach()
                     state_target = torch.clone(state_batch).detach()
                     return_target = torch.clone(return_to_go_batch).detach()
                     action_loss = self.model.loss_fn(action_pred, action_target)
                     state_loss = F.mse_loss(state_pred, state_target, reduction='mean')
-                    return_loss = F.cross_entropy(return_pred, return_target)
-                    imp_loss = expectile_loss(imp_return_pred, return_target)
+                    return_loss = F.cross_entropy(return_pred.squeeze(-1), return_target)
+                    imp_loss = expectile_loss(
+                        (imp_return_pred.squeeze(-1) - return_target),
+                        expectile=expectile
+                    ).mean()
                     edt_loss = (
                         action_loss
-                        + state_loss
-                        + return_loss
-                        + imp_loss
+                        + state_loss * state_loss_weight
+                        + imp_loss * exp_loss_weight
+                        + return_loss * ce_weight
                     )
 
                 optimizer.zero_grad()
@@ -94,11 +110,12 @@ class Trainer:
                 print(f'Epoch [{epoch+1}/{epochs}] loss = {epoch_loss}')
 
             if (epoch + 1) % 50 == 0:
-                torch.save(self.model.state_dict(), f'model_weights/{self.year}_len{self.max_len}.pth')
+                torch.save(self.model.state_dict(), f'{expr_name}_model_weights/{self.year}_len{self.max_len}.pth')
 
     def test(
         self,
         device: torch.device,
+        expr_name: str,
         state_size: int,
         action_size: int,
         state_test: torch.Tensor,
@@ -110,13 +127,13 @@ class Trainer:
         rs_steps: int = 2,
         rs_ratio: float = 1.0,
         real_rtg: bool = False,
-        heuristic_delta: float = 1.0,
-        previous_index: Optional[int] = None,
+        # heuristic_delta: float = 1.0,
+        # previous_index: Optional[int] = None,
     ):
         """
         test the model
         """
-        self.model.load_state_dict(torch.load(f'model_weights/{self.year}_len{self.max_len}.pth'))
+        self.model.load_state_dict(torch.load(f'{expr_name}_model_weights/{self.year}_len{self.max_len}.pth'))
         self.model.eval()
         dt_weights, indices = [], []
         target_return = torch.Tensor(
@@ -175,28 +192,29 @@ class Trainer:
                         rs_ratio=rs_ratio,
                         real_rtg=real_rtg,
                     )
-                else:
-                    act, best_index = return_search_heuristic(
-                        model=self.model,
-                        timesteps=timesteps_batch,
-                        states=state_batch,
-                        actions=action_batch,
-                        rewards_to_go=target_return,
-                        rewards=rewards_batch,
-                        context_len=self.max_len,
-                        t=idx,
-                        top_percentile=top_percentile,
-                        expert_weight=expert_weight,
-                        mgdt_sampling=mgdt_sampling,
-                        rs_steps=rs_steps,
-                        rs_ratio=rs_ratio,
-                        real_rtg=real_rtg,
-                        heuristic_delta=heuristic_delta,
-                        previous_index=previous_index,
-                    )
-                    previous_index = best_index
+                    indices.append(best_index)
+                # else:
+                #     act, best_index = return_search_heuristic(
+                #         model=self.model,
+                #         timesteps=timesteps_batch,
+                #         states=state_batch,
+                #         actions=action_batch,
+                #         rewards_to_go=target_return,
+                #         rewards=rewards_batch,
+                #         context_len=self.max_len,
+                #         t=idx,
+                #         top_percentile=top_percentile,
+                #         expert_weight=expert_weight,
+                #         mgdt_sampling=mgdt_sampling,
+                #         rs_steps=rs_steps,
+                #         rs_ratio=rs_ratio,
+                #         real_rtg=real_rtg,
+                #         heuristic_delta=heuristic_delta,
+                #         previous_index=previous_index,
+                #     )
+                #     previous_index = best_index
 
-                indices.append(best_index)
+                # indices.append(best_index)
                 reward_pred, have_position, act = compute_dr(
                     data[-1],
                     state_test[idx + 1, -1],

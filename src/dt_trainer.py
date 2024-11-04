@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from .model.dt_model import DecisionTransformer
 from .utils.utils import compute_dr
 
-class Trainer:
+class DTTrainer:
     """
     Decision transformer trainer
     """

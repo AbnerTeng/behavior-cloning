@@ -8,7 +8,9 @@ import torch
 from torch.utils.data import DataLoader
 
 from .model.dt_model import DecisionTransformer
-from .dt_trainer import Trainer
+from .model.edt_model import ElasticDecisionTransformer
+from .dt_trainer import DTTrainer
+from .edt_trainer import EDTTrainer
 from .create_dataset import (
     DataPreprocess,
     TradeLogDataset,
@@ -37,7 +39,7 @@ def get_args() -> Namespace:
         "--model",
         "-md",
         type=str,
-        default="dt"
+        default="edt"
     )
     parser.add_argument(
         "--mode", '-m', type=str, default="train"
@@ -137,19 +139,41 @@ if __name__ == '__main__':
             shuffle=True
         )
 
-        dt_model = DecisionTransformer(
-            state_size,
-            action_size,
-            train_config['train']['hidden_size']
-        ).to(DEVICE)
+        if p_args.model == "edt":
+            model = ElasticDecisionTransformer(
+                state_size,
+                action_size,
+                train_config['train']['hidden_size'],
+                3,
+                1,
+                True
+            )
+        else:
+            model = DecisionTransformer(
+                state_size,
+                action_size,
+                train_config['train']['hidden_size']
+            ).to(DEVICE)
 
         if test_year == train_config['start_year'] + 1:
-            torch.save(dt_model.state_dict(), f'{p_args.expr}_model_weights/original.pth')
+            torch.save(model.state_dict(), f'{p_args.expr}_model_weights/original.pth')
 
-        trainer = Trainer(test_year, dt_model, max_len)
+        if p_args.model == "edt":
+            edttrainer = EDTTrainer(test_year, model, max_len)
+        else:
+            dttrainer = DTTrainer(test_year, model, max_len)
 
         if p_args.mode == "train":
-            trainer.train(train_config['train']['epochs'], train_dataloader, p_args.expr)
+            if p_args.model == "edt":
+                edttrainer.train(
+                    train_config['train']['epochs'],
+                    train_dataloader,
+                    DEVICE,
+                    p_args.expr,
+                    expectile=0.99
+                )
+            else:
+                dttrainer.train(train_config['train']['epochs'], train_dataloader, p_args.expr)
 
         elif p_args.mode == "test":
             first_20 = s_test[0]
@@ -164,7 +188,7 @@ if __name__ == '__main__':
                 ],
                 dim=0
             )
-            trainer.test(
+            dttrainer.test(
                 DEVICE,
                 state_size,
                 action_size,

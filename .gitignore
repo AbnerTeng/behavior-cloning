@@ -1,9 +1,10 @@
-<<<<<<< HEAD
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
+*.pyc
 # C extensions
 *.so
 
@@ -161,8 +162,3 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
-||||||| (empty tree)
-=======
-.DS_Store
-dqn_replay/*
->>>>>>> f08ac03 (init: first commit)
