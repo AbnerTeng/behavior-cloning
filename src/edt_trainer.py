@@ -1,8 +1,6 @@
 """
 Training process for the decision transformer model
 """
-from typing import Optional
-
 import numpy as np
 from rich.progress import track
 import torch
@@ -56,6 +54,7 @@ class EDTTrainer:
             - mask_batch: torch.Tensor with shape (B, T)
         """
         self.model.load_state_dict(torch.load(f'{expr_name}_model_weights/original.pth'))
+        self.model.to(device)
         self.model.train()
         optimizer = optim.AdamW(self.model.parameters(), lr=1e-4, weight_decay=1e-4)
 
@@ -67,13 +66,6 @@ class EDTTrainer:
                 state_batch, _, action_batch, timesteps_batch, return_to_go_batch, mask_batch = data
 
                 with torch.autocast(device_type="cuda", dtype=torch.float32):  # automatic mixed precision
-                    # state_pred, action_pred, return_pred, imp_return_pred, _ = self.model(
-                    #     state_batch.float().cuda(),
-                    #     action_batch.float().cuda(),
-                    #     timesteps_batch.long().cuda(),
-                    #     return_to_go_batch.float().cuda(),
-                    #     attention_mask=mask_batch.bool().cuda()
-                    # )
                     state_pred, action_pred, return_pred, imp_return_pred, _ = self.model(
                         state_batch.float().to(device),
                         action_batch.float().to(device),
@@ -120,7 +112,7 @@ class EDTTrainer:
         action_size: int,
         state_test: torch.Tensor,
         trg: int = 1,
-        heuristic: bool = False,
+        # heuristic: bool = False,
         top_percentile: float = 0.15,
         expert_weight: float = 10.0,
         mgdt_sampling: bool = False,
@@ -175,24 +167,24 @@ class EDTTrainer:
                 if state_batch.shape[0] > self.max_len:
                     state_batch = state_batch[1:]
 
-                if not heuristic:
-                    act, best_index = return_search(
-                        model=self.model,
-                        timesteps=timesteps_batch,
-                        states=state_batch,
-                        actions=action_batch,
-                        rewards_to_go=target_return,
-                        rewards=rewards_batch,
-                        context_len=self.max_len,
-                        t=idx,
-                        top_percentile=top_percentile,
-                        expert_weight=expert_weight,
-                        mgdt_sampling=mgdt_sampling,
-                        rs_steps=rs_steps,
-                        rs_ratio=rs_ratio,
-                        real_rtg=real_rtg,
-                    )
-                    indices.append(best_index)
+                # if not heuristic:
+                action_pred, best_index = return_search(
+                    model=self.model,
+                    timesteps=timesteps_batch,
+                    states=state_batch,
+                    actions=action_batch,
+                    rewards_to_go=target_return,
+                    rewards=rewards_batch,
+                    context_len=self.max_len,
+                    t=idx,
+                    top_percentile=top_percentile,
+                    expert_weight=expert_weight,
+                    mgdt_sampling=mgdt_sampling,
+                    rs_steps=rs_steps,
+                    rs_ratio=rs_ratio,
+                    real_rtg=real_rtg,
+                )
+                indices.append(best_index)
                 # else:
                 #     act, best_index = return_search_heuristic(
                 #         model=self.model,
@@ -218,7 +210,7 @@ class EDTTrainer:
                 reward_pred, have_position, act = compute_dr(
                     data[-1],
                     state_test[idx + 1, -1],
-                    act,
+                    action_pred,
                     have_position,
                     act
                 )

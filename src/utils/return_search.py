@@ -8,6 +8,8 @@ import numpy as np
 import torch
 from torch.distributions.categorical import Categorical
 
+from ..model.edt_model import ElasticDecisionTransformer
+
 
 def sample_from_logits(
     logits: torch.Tensor,
@@ -56,33 +58,46 @@ def mgdt_logits(
 
 
 def return_search(
-    model,
-    timesteps,
-    states,
-    actions,
-    rewards_to_go,
-    rewards,
-    context_len,
-    t,
-    top_percentile,
-    expert_weight,
-    mgdt_sampling=False,
-    rs_steps=2,
-    rs_ratio=1,
-    real_rtg=False,
+    model: ElasticDecisionTransformer,
+    timesteps: torch.Tensor,
+    states: torch.Tensor,
+    actions: torch.Tensor,
+    rewards_to_go: torch.Tensor,
+    rewards: torch.Tensor,
+    context_len: int,
+    t: int,
+    top_percentile: float,
+    expert_weight: float,
+    mgdt_sampling: bool = False,
+    rs_steps: int = 2,
+    rs_ratio: int = 1,
+    real_rtg: bool = False,
 ) -> Tuple[torch.Tensor, int]:
     """
     Search for the T for maximizing the return to go
 
-    Returns:
-        best_act: torch.Tensor --> best action to take
-        context_len - best_i: int --> the index of the best action
-    """
+    Args:
+        model: (ElasticDecisionTransformer) --> model to use
+        timesteps: (torch.Tensor) --> timesteps batch of test data
+        states: (torch.Tensor) --> states batch of test data
+        actions: (torch.Tensor) --> actions batch of test data
+        rewards_to_go: (torch.Tensor) --> rewards to go batch of test data
+        rewards: (torch.Tensor) --> rewards batch of test data
+        context_len: (int) --> context length
+        t: (int) --> current timestep
+        top_percentile: (float) --> top percentile for expert sampling
+        expert_weight: (float) --> expert weight for expert sampling
+        mgdt_sampling: (bool) --> whether to use mgdt sampling
+        rs_steps: (int) --> number of steps for return search
+        rs_ratio: (int) --> ratio for return search
+        real_rtg: (bool) --> whether to use real return to go
 
+    Returns:
+        best_act: (torch.Tensor) --> best action to take
+        context_len - best_i: (int) --> the index of the best action
+    """
     # B x T x 1?
-    highest_ret = -999
-    best_i = 0
-    best_act = None
+    highest_ret, best_i, best_act = -999, 0, None
 
     if t < context_len:
         for i in range(0, math.ceil((t + 1)/rs_ratio), rs_steps):
