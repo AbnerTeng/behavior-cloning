@@ -1,6 +1,8 @@
 """
 Training process for the decision transformer model
 """
+import os
+
 import numpy as np
 from rich.progress import track
 import torch
@@ -70,6 +72,7 @@ class DTTrainer:
     def test(
         self,
         device: torch.device,
+        expr_name: str,
         state_size: int,
         action_size: int,
         state_test: torch.Tensor,
@@ -78,7 +81,7 @@ class DTTrainer:
         """
         test the model
         """
-        self.model.load_state_dict(torch.load(f'model_weights/{self.year}_len{self.max_len}.pth'))
+        self.model.load_state_dict(torch.load(f'{expr_name}_model_weights/{self.year}_len{self.max_len}.pth'))
         self.model.eval()
         dt_weights = []
         target_return = torch.tensor(
@@ -159,4 +162,7 @@ class DTTrainer:
                         dim=1
                     )
 
-        np.save(f'act_weights/dt_weights_{self.year}_len{self.max_len}_{trg}', np.array(dt_weights))
+        if f'{expr_name}_act_weights' not in os.listdir():
+            os.mkdir(f'{expr_name}_act_weights')
+
+        np.save(f'{expr_name}_act_weights/dt_weights_{self.year}_len{self.max_len}_{trg}', np.array(dt_weights))

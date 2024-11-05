@@ -82,7 +82,7 @@ class PrepareDataset:
         """
         raise NotImplementedError
 
-    def run(self, state_with_vol: bool, get_next_state: bool, k: int = 2) -> Dict[str, Dict[str, np.ndarray]]:
+    def run(self, state_with_vol: bool, get_next_state: bool, k: int = 17) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Run the dataset preparation code, and get the top k return strategies
         """

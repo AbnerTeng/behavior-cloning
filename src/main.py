@@ -39,10 +39,10 @@ def get_args() -> Namespace:
         "--model",
         "-md",
         type=str,
-        default="edt"
+        default="dt"
     )
     parser.add_argument(
-        "--mode", '-m', type=str, default="train"
+        "--mode", '-m', type=str, default="test"
     )
     parser.add_argument(
         "--k", type=int, default=17
@@ -63,7 +63,8 @@ if __name__ == '__main__':
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     prepare_instance = PrepareDataset(f"trade_log/{p_args.expr}", "env_data/sp500.csv")
-    trajectories = prepare_instance.run(p_args.state_with_vol, p_args.k)
+    generate_next_state = True if p_args.model == "edt" else False
+    trajectories = prepare_instance.run(p_args.state_with_vol, generate_next_state, k=p_args.k)
     new_trajectories = {}
 
     if p_args.model == "edt":
@@ -188,13 +189,25 @@ if __name__ == '__main__':
                 ],
                 dim=0
             )
-            dttrainer.test(
-                DEVICE,
-                state_size,
-                action_size,
-                single_state,
-                train_config['train']['target_return']
-            )
+
+            if p_args.model == "edt":
+                edttrainer.test(
+                    DEVICE,
+                    p_args.expr,
+                    state_size,
+                    action_size,
+                    single_state,
+                    train_config['train']['target_return']
+                )
+            else:
+                dttrainer.test(
+                    DEVICE,
+                    p_args.expr,
+                    state_size,
+                    action_size,
+                    single_state,
+                    train_config['train']['target_return']
+                )
 
         else:
             rp('Invalid mode')
