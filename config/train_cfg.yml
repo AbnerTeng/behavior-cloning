@@ -1,6 +1,6 @@
 device: 0
 seed_number: 42
-start_year: 2011
+start_year: 2010
 end_year: 2025
 gamma: 0.99
 

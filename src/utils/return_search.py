@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 import math
 
 import numpy as np
+from sympy import im
 import torch
 from torch.distributions.categorical import Categorical
 
@@ -78,11 +79,11 @@ def return_search(
 
     Args:
         model: (ElasticDecisionTransformer) --> model to use
-        timesteps: (torch.Tensor) --> timesteps batch of test data
-        states: (torch.Tensor) --> states batch of test data
-        actions: (torch.Tensor) --> actions batch of test data
-        rewards_to_go: (torch.Tensor) --> rewards to go batch of test data
-        rewards: (torch.Tensor) --> rewards batch of test data
+        timesteps: (torch.Tensor) --> timesteps batch of test data (2D)
+        states: (torch.Tensor) --> states batch of test data (2D)
+        actions: (torch.Tensor) --> actions batch of test data (2D)
+        rewards_to_go: (torch.Tensor) --> rewards to go batch of test data (2D)
+        rewards: (torch.Tensor) --> rewards batch of test data (2D)
         context_len: (int) --> context length
         t: (int) --> current timestep
         top_percentile: (float) --> top percentile for expert sampling
@@ -102,11 +103,14 @@ def return_search(
     if t < context_len:
         for i in range(0, math.ceil((t + 1)/rs_ratio), rs_steps):
             act_preds, ret_preds, imp_ret_preds = model.get_action(
-                timesteps[:, i : context_len + i],
-                states[:, i : context_len + i],
-                actions[:, i : context_len + i],
-                rewards_to_go[:, i : context_len + i],
-                rewards[:, i : context_len + i],
+                # states[:, i : context_len + i],
+                # actions[:, i : context_len + i],
+                # rewards_to_go[:, i : context_len + i],
+                # timesteps[:, i : context_len + i],
+                states[i:, :],
+                actions[i:, :],
+                rewards_to_go[:, i:],
+                timesteps[:, i:],
             )
 
             # first sample return with optimal weight
@@ -120,40 +124,51 @@ def return_search(
 
                 # we should estimate it again with the estimated rtg
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
-                    timesteps[:, i : context_len + i],
-                    states[:, i : context_len + i],
-                    actions[:, i : context_len + i],
+                    # states[:, i : context_len + i],
+                    # actions[:, i : context_len + i],
+                    # opt_rtg,
+                    # timesteps[:, i : context_len + i],
+                    states[i:, :],
+                    actions[i:, :],
                     opt_rtg,
-                    rewards[:, i : context_len + i],
+                    timesteps[:, i:],
                 )
 
             else:
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
-                    timesteps[:, i : context_len + i],
-                    states[:, i : context_len + i],
-                    actions[:, i : context_len + i],
+                    # states[:, i : context_len + i],
+                    # actions[:, i : context_len + i],
+                    # imp_ret_preds,
+                    # timesteps[:, i : context_len + i],
+                    states[i:, :],
+                    actions[i:, :],
                     imp_ret_preds,
-                    rewards[:, i : context_len + i],
+                    timesteps[:, i:],
                 )
 
             if not real_rtg:
                 imp_ret_preds = imp_ret_preds_pure
 
             ret_i = imp_ret_preds[:, t - i].detach().item()
+
             if ret_i > highest_ret:
                 highest_ret = ret_i
                 best_i = i
-                best_act = act_preds[0, t - i].detach()
+                # best_act = act_preds[0, t - i].detach()
+                best_act = act_preds.detach()
 
 
     else:
         for i in range(0, math.ceil(context_len/rs_ratio), rs_steps):
             act_preds, ret_preds, imp_ret_preds = model.get_action(
-                timesteps[:, t - context_len + 1 + i : t + 1 + i],
-                states[:, t - context_len + 1 + i : t + 1 + i],
-                actions[:, t - context_len + 1 + i : t + 1 + i],
-                rewards_to_go[:, t - context_len + 1 + i : t + 1 + i],
-                rewards[:, t - context_len + 1 + i : t + 1 + i],
+                # states[t - context_len + 1 + i : t + 1 + i, :],
+                # actions[t - context_len + 1 + i : t + 1 + i, :],
+                # rewards_to_go[:, t - context_len + 1 + i : t + 1 + i],
+                # timesteps[:, t - context_len + 1 + i : t + 1 + i],
+                states[:, :],
+                actions[:, :],
+                rewards_to_go[:, :],
+                timesteps[:, :],
             )
 
             # first sample return with optimal weight
@@ -166,30 +181,38 @@ def return_search(
 
                 # we should estimate the results again with the estimated return
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
-                    timesteps[:, t - context_len + 1 + i : t + 1 + i],
-                    states[:, t - context_len + 1 + i : t + 1 + i],
-                    actions[:, t - context_len + 1 + i : t + 1 + i],
+                    # states[t - context_len + 1 + i : t + 1 + i, :],
+                    # actions[t - context_len + 1 + i : t + 1 + i, :],
+                    # opt_rtg,
+                    # timesteps[:, t - context_len + 1 + i : t + 1 + i],
+                    states[:, :],
+                    actions[:, :],
                     opt_rtg,
-                    rewards[:, t - context_len + 1 + i : t + 1 + i],
+                    timesteps[:, :],
                 )
 
             else:
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
-                    timesteps[:, t - context_len + 1 + i : t + 1 + i],
-                    states[:, t - context_len + 1 + i : t + 1 + i],
-                    actions[:, t - context_len + 1 + i : t + 1 + i],
+                    # states[t - context_len + 1 + i : t + 1 + i, :],
+                    # actions[t - context_len + 1 + i : t + 1 + i, :],
+                    # imp_ret_preds,
+                    # timesteps[:, t - context_len + 1 + i : t + 1 + i],
+                    states[:, :],
+                    actions[:, :],
                     imp_ret_preds,
-                    rewards[:, t - context_len + 1 + i : t + 1 + i],
+                    timesteps[:, :],
                 )
 
             if not real_rtg:
                 imp_ret_preds = imp_ret_preds_pure
 
             ret_i = imp_ret_preds[:, -1 - i].detach().item()
+
             if ret_i > highest_ret:
                 highest_ret = ret_i
                 best_i = i
-                best_act = act_preds[0, -1 - i].detach()
+                # best_act = act_preds[0, -1 - i].detach()
+                best_act = act_preds.detach()
 
     return best_act, context_len - best_i
 

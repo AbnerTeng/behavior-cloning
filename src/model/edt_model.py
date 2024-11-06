@@ -161,4 +161,4 @@ class ElasticDecisionTransformer(DecisionTransformer):
             attention_mask=attention_mask
         )
 
-        return action_pred[0, -1], ret_pred, imp_ret_pred
+        return action_pred[0, -1], ret_pred.squeeze(-1), imp_ret_pred.squeeze(-1)

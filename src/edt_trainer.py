@@ -130,13 +130,13 @@ class EDTTrainer:
         self.model.load_state_dict(torch.load(f'{expr_name}_model_weights/{self.year}_len{self.max_len}.pth'))
         self.model.eval()
         edt_weights, indices = [], []
-        target_return = torch.Tensor(
+        target_return = torch.tensor(
             trg,
             device=device,
             dtype=torch.float32
         ).reshape(1, 1)
-        rewards_batch = torch.Tensor(
-            0,
+        rewards_batch = torch.zeros(
+            (1, 1),
             device=device,
             dtype=torch.float32
         )
@@ -150,7 +150,7 @@ class EDTTrainer:
             device=device,
             dtype=torch.float32
         )
-        timesteps_batch = torch.Tensor(
+        timesteps_batch = torch.tensor(
             0,
             device=device,
             dtype=torch.long
@@ -209,6 +209,15 @@ class EDTTrainer:
                 #     previous_index = best_index
 
                 # indices.append(best_index)
+
+                if idx >= self.max_len - 1:
+                    edt_weights.append(action_pred.tolist())
+
+                action_batch = torch.cat([action_batch, action_pred.reshape(1, action_size)], dim=0)
+
+                if action_batch.shape[0] > self.max_len:
+                    action_batch = action_batch[1:]
+
                 reward_pred, have_position, act = compute_dr(
                     data[-1],
                     state_test[idx + 1, -1],

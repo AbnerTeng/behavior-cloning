@@ -39,7 +39,7 @@ def get_args() -> Namespace:
         "--model",
         "-md",
         type=str,
-        default="dt"
+        default="edt"
     )
     parser.add_argument(
         "--mode", '-m', type=str, default="test"
