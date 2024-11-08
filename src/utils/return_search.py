@@ -5,7 +5,6 @@ from typing import Optional, Tuple
 import math
 
 import numpy as np
-from sympy import im
 import torch
 from torch.distributions.categorical import Categorical
 
@@ -64,7 +63,6 @@ def return_search(
     states: torch.Tensor,
     actions: torch.Tensor,
     rewards_to_go: torch.Tensor,
-    rewards: torch.Tensor,
     context_len: int,
     t: int,
     top_percentile: float,
@@ -83,7 +81,6 @@ def return_search(
         states: (torch.Tensor) --> states batch of test data (2D)
         actions: (torch.Tensor) --> actions batch of test data (2D)
         rewards_to_go: (torch.Tensor) --> rewards to go batch of test data (2D)
-        rewards: (torch.Tensor) --> rewards batch of test data (2D)
         context_len: (int) --> context length
         t: (int) --> current timestep
         top_percentile: (float) --> top percentile for expert sampling
@@ -103,14 +100,10 @@ def return_search(
     if t < context_len:
         for i in range(0, math.ceil((t + 1)/rs_ratio), rs_steps):
             act_preds, ret_preds, imp_ret_preds = model.get_action(
-                # states[:, i : context_len + i],
-                # actions[:, i : context_len + i],
-                # rewards_to_go[:, i : context_len + i],
-                # timesteps[:, i : context_len + i],
-                states[i:, :],
-                actions[i:, :],
-                rewards_to_go[:, i:],
-                timesteps[:, i:],
+                states[:, i : context_len + i],
+                actions[:, i : context_len + i],
+                rewards_to_go[:, i : context_len + i],
+                timesteps[:, i : context_len + i],
             )
 
             # first sample return with optimal weight
@@ -124,26 +117,18 @@ def return_search(
 
                 # we should estimate it again with the estimated rtg
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
-                    # states[:, i : context_len + i],
-                    # actions[:, i : context_len + i],
-                    # opt_rtg,
-                    # timesteps[:, i : context_len + i],
-                    states[i:, :],
-                    actions[i:, :],
+                    states[:, i : context_len + i],
+                    actions[:, i : context_len + i],
                     opt_rtg,
-                    timesteps[:, i:],
+                    timesteps[:, i : context_len + i],
                 )
 
             else:
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
-                    # states[:, i : context_len + i],
-                    # actions[:, i : context_len + i],
-                    # imp_ret_preds,
-                    # timesteps[:, i : context_len + i],
-                    states[i:, :],
-                    actions[i:, :],
+                    states[:, i : context_len + i],
+                    actions[:, i : context_len + i],
                     imp_ret_preds,
-                    timesteps[:, i:],
+                    timesteps[:, i : context_len + i],
                 )
 
             if not real_rtg:
@@ -161,14 +146,10 @@ def return_search(
     else:
         for i in range(0, math.ceil(context_len/rs_ratio), rs_steps):
             act_preds, ret_preds, imp_ret_preds = model.get_action(
-                # states[t - context_len + 1 + i : t + 1 + i, :],
-                # actions[t - context_len + 1 + i : t + 1 + i, :],
-                # rewards_to_go[:, t - context_len + 1 + i : t + 1 + i],
-                # timesteps[:, t - context_len + 1 + i : t + 1 + i],
-                states[:, :],
-                actions[:, :],
-                rewards_to_go[:, :],
-                timesteps[:, :],
+                states[:, t - context_len + 1 + i : t + 1 + i, :],
+                actions[:, t - context_len + 1 + i : t + 1 + i, :],
+                rewards_to_go[:, t - context_len + 1 + i : t + 1 + i],
+                timesteps[:, t - context_len + 1 + i : t + 1 + i],
             )
 
             # first sample return with optimal weight
@@ -181,26 +162,18 @@ def return_search(
 
                 # we should estimate the results again with the estimated return
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
-                    # states[t - context_len + 1 + i : t + 1 + i, :],
-                    # actions[t - context_len + 1 + i : t + 1 + i, :],
-                    # opt_rtg,
-                    # timesteps[:, t - context_len + 1 + i : t + 1 + i],
-                    states[:, :],
-                    actions[:, :],
+                    states[:, t - context_len + 1 + i : t + 1 + i, :],
+                    actions[:, t - context_len + 1 + i : t + 1 + i, :],
                     opt_rtg,
-                    timesteps[:, :],
+                    timesteps[:, t - context_len + 1 + i : t + 1 + i],
                 )
 
             else:
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
-                    # states[t - context_len + 1 + i : t + 1 + i, :],
-                    # actions[t - context_len + 1 + i : t + 1 + i, :],
-                    # imp_ret_preds,
-                    # timesteps[:, t - context_len + 1 + i : t + 1 + i],
-                    states[:, :],
-                    actions[:, :],
+                    states[:, t - context_len + 1 + i : t + 1 + i, :],
+                    actions[:, t - context_len + 1 + i : t + 1 + i, :],
                     imp_ret_preds,
-                    timesteps[:, :],
+                    timesteps[:, t - context_len + 1 + i : t + 1 + i],
                 )
 
             if not real_rtg:

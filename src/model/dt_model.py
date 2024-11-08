@@ -107,6 +107,8 @@ class DecisionTransformer(nn.Module):
         input:
         - action_pred: (n, d, action_size)
         - action_target: (n, d, action_size)
+
+        TODO: Check the loss function input
         """
         action_pred = F.softmax(action_pred, dim=-1)
         action_pred = action_pred.permute(0, 2, 1)

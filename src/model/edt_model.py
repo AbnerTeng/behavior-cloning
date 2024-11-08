@@ -86,7 +86,7 @@ class ElasticDecisionTransformer(DecisionTransformer):
         time_embeddings = self.embed_timestep(timesteps)
         state_embeddings = self.embed_state(state) + time_embeddings
         action_embeddings = self.embed_action(action) + time_embeddings
-        returns_embeddings = self.embed_rtg(return_to_go.unsqueeze(-1)) + time_embeddings
+        returns_embeddings = self.embed_rtg(return_to_go) + time_embeddings
 
         stacked_inputs = torch.stack(
             (
@@ -161,4 +161,5 @@ class ElasticDecisionTransformer(DecisionTransformer):
             attention_mask=attention_mask
         )
 
-        return action_pred[0, -1], ret_pred.squeeze(-1), imp_ret_pred.squeeze(-1)
+        # return action_pred[0, -1], ret_pred.squeeze(-1), imp_ret_pred.squeeze(-1)
+        return action_pred[0, -1], ret_pred, imp_ret_pred

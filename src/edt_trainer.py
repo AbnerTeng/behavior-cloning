@@ -11,12 +11,12 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .model.edt_model import ElasticDecisionTransformer
-from .utils.utils import compute_dr
 from .utils.edt_utils import expectile_loss
 from .utils.return_search import (
     return_search,
     # return_search_heuristic
 )
+from .env.trade_env import TradeEnv
 
 
 class EDTTrainer:
@@ -60,12 +60,13 @@ class EDTTrainer:
         self.model.train()
         optimizer = optim.AdamW(self.model.parameters(), lr=1e-4, weight_decay=1e-4)
 
-        for epoch in track(range(epochs)):
+        for epoch in track(range(epochs)):  # epochs = max_train_iters
             total_sample = 0
             total_loss = 0
 
-            for data in tr_loader:
+            for data in tr_loader:  # len(tr_loader) = num_updates per iter
                 state_batch, _, action_batch, timesteps_batch, return_to_go_batch, mask_batch = data
+                return_to_go_batch = return_to_go_batch.unsqueeze(-1)
 
                 with torch.autocast(device_type="cuda", dtype=torch.float32):  # automatic mixed precision
                     state_pred, action_pred, return_pred, imp_return_pred, _ = self.model(
@@ -80,9 +81,9 @@ class EDTTrainer:
                     return_target = torch.clone(return_to_go_batch).detach()
                     action_loss = self.model.loss_fn(action_pred, action_target)
                     state_loss = F.mse_loss(state_pred, state_target, reduction='mean')
-                    return_loss = F.cross_entropy(return_pred.squeeze(-1), return_target)
+                    return_loss = F.cross_entropy(return_pred, return_target)
                     imp_loss = expectile_loss(
-                        (imp_return_pred.squeeze(-1) - return_target),
+                        (imp_return_pred - return_target),
                         expectile=expectile
                     ).mean()
                     edt_loss = (
@@ -113,7 +114,7 @@ class EDTTrainer:
         state_size: int,
         action_size: int,
         state_test: torch.Tensor,
-        trg: int = 1,
+        rtg_target: int = 1,
         # heuristic: bool = False,
         top_percentile: float = 0.15,
         expert_weight: float = 10.0,
@@ -126,121 +127,120 @@ class EDTTrainer:
     ):
         """
         test the model
+
+        state_test.shape -> shape(290, 4) at year 2011
+        state_size: (int) -> 4
+        action_size: (int) -> 4
+        trg: (int) -> 1
         """
+        # env = TradeEnv(data)  # (2xx, 20, 4)
+        # init_state = env.reset()
+
+        env = TradeEnv(state_test)
+        eval_batch_size = 1
+        num_eval_ep = 1
+        total_reward = 0
+        indices, edt_weights = [], []
+
+        timesteps = torch.arange(
+            start=0, end=state_test.shape[0] + 2 * self.max_len, step=1
+        )
+        timesteps = timesteps.repeat(eval_batch_size, 1).to(device)
         self.model.load_state_dict(torch.load(f'{expr_name}_model_weights/{self.year}_len{self.max_len}.pth'))
         self.model.eval()
-        edt_weights, indices = [], []
-        target_return = torch.tensor(
-            trg,
-            device=device,
-            dtype=torch.float32
-        ).reshape(1, 1)
-        rewards_batch = torch.zeros(
-            (1, 1),
-            device=device,
-            dtype=torch.float32
-        )
-        state_batch = torch.zeros(
-            (0, state_size),
-            device=device,
-            dtype=torch.float32
-        )
-        action_batch = torch.zeros(
-            (1, action_size),
-            device=device,
-            dtype=torch.float32
-        )
-        timesteps_batch = torch.tensor(
-            0,
-            device=device,
-            dtype=torch.long
-        ).reshape(1, 1)
-        have_position = False
-        act = None
 
         with torch.no_grad():
-            print(len(state_test[:-1]))
-            for idx, data in track(enumerate(state_test[:-1]), description=f'Test [{self.year}]'):
-                state_batch = torch.cat(
-                    [state_batch, data.reshape(1, state_size)],
-                    dim=0
+            for _ in range(num_eval_ep):
+                actions = torch.zeros(
+                    (eval_batch_size, state_test.shape[0] + 2 * self.max_len, action_size),
+                    dtype=torch.float32,
+                    device=device
+                )
+                states = torch.zeros(
+                    (eval_batch_size, state_test.shape[0] + 2 * self.max_len, state_size),
+                    dtype=torch.float32,
+                    device=device
+                )
+                rewards_to_go = torch.zeros(
+                    (eval_batch_size, state_test.shape[0] + 2 * self.max_len, 1),
+                    dtype=torch.float32,
+                    device=device
+                )
+                rewards = torch.zeros(
+                    (eval_batch_size, state_test.shape[0] + 2 * self.max_len, 1),
+                    dtype=torch.float32,
+                    device=device
                 )
 
-                if state_batch.shape[0] > self.max_len:
-                    state_batch = state_batch[1:]
+                # initialize episode
+                initial_state = env.reset()  # assume it's a (20, 4) matrix
+                running_state = initial_state[:19, :]
+                running_reward = 0
+                running_rtg = rtg_target
 
-                # if not heuristic:
-                action_pred, best_index = return_search(
-                    model=self.model,
-                    timesteps=timesteps_batch,
-                    states=state_batch,
-                    actions=action_batch,
-                    rewards_to_go=target_return,
-                    rewards=rewards_batch,
-                    context_len=self.max_len,
-                    t=idx,
-                    top_percentile=top_percentile,
-                    expert_weight=expert_weight,
-                    mgdt_sampling=mgdt_sampling,
-                    rs_steps=rs_steps,
-                    rs_ratio=rs_ratio,
-                    real_rtg=real_rtg,
-                )
-                indices.append(best_index)
-                # else:
-                #     act, best_index = return_search_heuristic(
-                #         model=self.model,
-                #         timesteps=timesteps_batch,
-                #         states=state_batch,
-                #         actions=action_batch,
-                #         rewards_to_go=target_return,
-                #         rewards=rewards_batch,
-                #         context_len=self.max_len,
-                #         t=idx,
-                #         top_percentile=top_percentile,
-                #         expert_weight=expert_weight,
-                #         mgdt_sampling=mgdt_sampling,
-                #         rs_steps=rs_steps,
-                #         rs_ratio=rs_ratio,
-                #         real_rtg=real_rtg,
-                #         heuristic_delta=heuristic_delta,
-                #         previous_index=previous_index,
-                #     )
-                #     previous_index = best_index
+                for t in track(range(state_test.shape[0] - self.max_len), description=f'Test [{self.year}]'):
+                    states[0, t: t + 19] = running_state
+                    running_rtg -= running_reward
+                    rewards_to_go[0, t] = running_rtg
+                    rewards[0, t] = running_reward
 
-                # indices.append(best_index)
+                    # if not heuristic:
+                    action_pred, best_index = return_search(
+                        model=self.model,
+                        timesteps=timesteps,
+                        states=states,
+                        actions=actions,
+                        rewards_to_go=rewards_to_go,
+                        context_len=self.max_len,
+                        t=t,
+                        top_percentile=top_percentile,
+                        expert_weight=expert_weight,
+                        mgdt_sampling=mgdt_sampling,
+                        rs_steps=rs_steps,
+                        rs_ratio=rs_ratio,
+                        real_rtg=real_rtg,
+                    )
+                    indices.append(best_index)
+                    # else:
+                    #     act, best_index = return_search_heuristic(
+                    #         model=self.model,
+                    #         timesteps=timesteps_batch,
+                    #         states=state_batch,
+                    #         actions=action_batch,
+                    #         rewards_to_go=target_return,
+                    #         rewards=rewards_batch,
+                    #         context_len=self.max_len,
+                    #         t=idx,
+                    #         top_percentile=top_percentile,
+                    #         expert_weight=expert_weight,
+                    #         mgdt_sampling=mgdt_sampling,
+                    #         rs_steps=rs_steps,
+                    #         rs_ratio=rs_ratio,
+                    #         real_rtg=real_rtg,
+                    #         heuristic_delta=heuristic_delta,
+                    #         previous_index=previous_index,
+                    #     )
+                    #     previous_index = best_index
 
-                if idx >= self.max_len - 1:
+                    # indices.append(best_index)
+
+                    new_state, running_reward, done, _ = env.step(np.argmax(action_pred).item())
+                    last_state = new_state[-1:, :]
+                    running_state = torch.cat(
+                        [running_state[1:], last_state],
+                        dim=0
+                    )
+                    actions[0, t] = action_pred
+                    total_reward += running_reward
                     edt_weights.append(action_pred.tolist())
 
-                action_batch = torch.cat([action_batch, action_pred.reshape(1, action_size)], dim=0)
-
-                if action_batch.shape[0] > self.max_len:
-                    action_batch = action_batch[1:]
-
-                reward_pred, have_position, act = compute_dr(
-                    data[-1],
-                    state_test[idx + 1, -1],
-                    action_pred,
-                    have_position,
-                    act
-                )
-                next_target_return = target_return[0, -1] - reward_pred
-                target_return = torch.cat([target_return, next_target_return.reshape(1, 1)], dim=1)
-
-                if target_return.shape[1] > self.max_len:
-                    target_return = target_return[:, 1:]
-
-                if timesteps_batch.shape[1] < self.max_len:
-                    timesteps_batch = torch.cat(
-                        [
-                            timesteps_batch,
-                            torch.ones((1, 1), device=device, dtype=torch.long) * (idx+1)
-                        ],
-                        dim=1
-                    )
+                    if done:
+                        break
 
         if f'{expr_name}_act_weights' not in os.listdir():
             os.mkdir(f'{expr_name}_act_weights')
 
-        np.save(f'{expr_name}_act_weights/edt_weights_{self.year}_len{self.max_len}_{trg}', np.array(edt_weights))
+        np.save(
+            f'{expr_name}_act_weights/edt_weights_{self.year}_len{self.max_len}_{rtg_target}',
+            np.array(edt_weights)
+        )
