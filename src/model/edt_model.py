@@ -65,7 +65,8 @@ class ElasticDecisionTransformer(DecisionTransformer):
         self.predict_action = nn.Sequential(
             *(
                 [nn.Linear(self.hidden_size, self.action_size)]
-                + ([nn.Tanh()] if self.is_continuous else [])
+                # + ([nn.Tanh()] if self.is_continuous else [])
+                + ([nn.Sigmoid()] if self.is_continuous else [])
             )
         )
         self.predict_reward = nn.Linear(self.hidden_size, 1)

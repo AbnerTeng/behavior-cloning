@@ -133,9 +133,6 @@ class EDTTrainer:
         action_size: (int) -> 4
         trg: (int) -> 1
         """
-        # env = TradeEnv(data)  # (2xx, 20, 4)
-        # init_state = env.reset()
-
         env = TradeEnv(state_test)
         eval_batch_size = 1
         num_eval_ep = 1
@@ -230,6 +227,7 @@ class EDTTrainer:
                         [running_state[1:], last_state],
                         dim=0
                     )
+                    print(action_pred)
                     actions[0, t] = action_pred
                     total_reward += running_reward
                     edt_weights.append(action_pred.tolist())
