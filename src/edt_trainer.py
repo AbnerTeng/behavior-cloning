@@ -227,7 +227,6 @@ class EDTTrainer:
                         [running_state[1:], last_state],
                         dim=0
                     )
-                    print(action_pred)
                     actions[0, t] = action_pred
                     total_reward += running_reward
                     edt_weights.append(action_pred.tolist())
