@@ -6,6 +6,7 @@ import math
 
 import numpy as np
 import torch
+from torch import nn
 from torch.distributions.categorical import Categorical
 
 from ..model.edt_model import ElasticDecisionTransformer
@@ -105,7 +106,7 @@ def return_search(
                 rewards_to_go[:, i : context_len + i],
                 timesteps[:, i : context_len + i],
             )
-
+            act_preds = nn.Sigmoid()(act_preds)
             # first sample return with optimal weight
             # this sampling is the same as mgdt
             if mgdt_sampling:
@@ -151,7 +152,7 @@ def return_search(
                 rewards_to_go[:, t - context_len + 1 + i : t + 1 + i],
                 timesteps[:, t - context_len + 1 + i : t + 1 + i],
             )
-
+            act_preds = nn.Sigmoid()(act_preds)
             # first sample return with optimal weight
             if mgdt_sampling:
                 opt_rtg = expert_sampling(

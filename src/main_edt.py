@@ -33,7 +33,7 @@ def get_args() -> Namespace:
         action="store_true"
     )
     parser.add_argument(
-        "--mode", '-m', type=str, default="train"
+        "--mode", '-m', type=str, default="test"
     )
     parser.add_argument(
         "--k", type=int, default=17
@@ -76,22 +76,22 @@ if __name__ == '__main__':
 
         preproc = DataPreprocess(max_len, state_size, action_size, train_config["gamma"])
 
-        state, next_state, action, timestep, returntogo, mask = preproc.split_data(
+        state, norm_state, next_state, action, timestep, returntogo, mask = preproc.split_data(
             new_trajectories['state'],
             new_trajectories['next_state'],
             new_trajectories['action'],
             new_trajectories['return']
         )
 
-        t_train, s_train, ns_train, a_train, r_train = get_slicev2(
-            [timestep, state, next_state, action, returntogo],
+        t_train, norm_s_train, ns_train, a_train, r_train = get_slicev2(
+            [timestep, norm_state, next_state, action, returntogo],
             p_args.k,
             start=0,
             end=train_len
         )
         # timestep = np.expand_dims(timestep.cpu().numpy(), axis=-1)
-        t_test, s_test, ns_test, a_test, r_test = get_test_slicev2(
-            [timestep, state, next_state, action, returntogo],
+        t_test, s_test, norm_s_test, ns_test, a_test, r_test = get_test_slicev2(
+            [timestep, state, norm_state, next_state, action, returntogo],
             p_args.k,
             train_len,
             max_len,
@@ -99,7 +99,7 @@ if __name__ == '__main__':
             test_year,
             year_list
         )
-        train_dataset = EDTTradeLogDataset(s_train, ns_train, a_train, r_train, t_train, mask)
+        train_dataset = EDTTradeLogDataset(norm_s_train, ns_train, a_train, r_train, t_train, mask)
 
         train_dataloader = DataLoader(
             train_dataset,
@@ -131,15 +131,27 @@ if __name__ == '__main__':
             )
 
         elif p_args.mode == "test":
-            first_20 = s_test[0]
+            first_20 = norm_s_test[0]
             single_state = [
-                s_test[p_args.k * i, -1, :].unsqueeze(0) for i in range(1, int(s_test.shape[0] / p_args.k))
+                norm_s_test[p_args.k * i, -1, :].unsqueeze(0) for i in range(1, int(norm_s_test.shape[0] / p_args.k))
             ]
             single_state = torch.stack(single_state).to(DEVICE)
             single_state = torch.cat(
                 [
                     first_20,
                     single_state.squeeze(1)
+                ],
+                dim=0
+            )
+            first_20_denorm = s_test[0]
+            single_state_denorm = [
+                s_test[p_args.k * i, -1, :].unsqueeze(0) for i in range(1, int(s_test.shape[0] / p_args.k))
+            ]
+            single_state_denorm = torch.stack(single_state_denorm).to(DEVICE)
+            single_state_denorm = torch.cat(
+                [
+                    first_20_denorm,
+                    single_state_denorm.squeeze(1)
                 ],
                 dim=0
             )
@@ -150,6 +162,7 @@ if __name__ == '__main__':
                 state_size,
                 action_size,
                 single_state,
+                single_state_denorm,
                 train_config['train']['target_return']
             )
 

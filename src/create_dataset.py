@@ -99,6 +99,8 @@ class DataPreprocess:
             Tuple[torch.Tensor]: (s, a, rt, t, mask)
             s --> stacked state with shape
                 (k * (state_set.shape[1] - self.max_length+1)), self.max_length, 4)
+            norm_s --> stacked normalized state with shape
+                (k * (state_set.shape[1] - self.max_length+1)), self.max_length, 4)
             ns --> stacked next state with shape
                 (k * (next_state_set.shape[1] - self.max_length+1)), self.max_length, 4)
             a --> stacked action with shape
@@ -111,13 +113,14 @@ class DataPreprocess:
             mask --> stacked mask with shape
                 (k * (state_set.shape[1] - self.max_length+1)), self.max_length)
         """
-        s, ns, a, t, rt, mask = [], [], [], [], [], []
+        s, norm_s, ns, a, t, rt, mask = [], [], [], [], [], [], []
 
         for start_idx in range(state_set.shape[1] - self.max_length + 1):
             state_piece = state_set[:, start_idx: start_idx + self.max_length, :]  # (k, 20, 4)
             seq_length = state_piece.shape[1]
             state_norm = min_max_norm(state_piece)
-            s.append(state_norm)
+            s.append(state_piece)
+            norm_s.append(state_norm)
 
             if next_state_set is not None:
                 next_state_piece = next_state_set[:, start_idx: start_idx + self.max_length, :]  # (k, 20, 4)
@@ -141,6 +144,10 @@ class DataPreprocess:
             np.concatenate(s, axis=0)
         ).to(dtype=torch.float32, device=self.device)
 
+        norm_s = torch.from_numpy(
+            np.concatenate(norm_s, axis=0)
+        ).to(dtype=torch.float32, device=self.device)
+
         if next_state_set is not None:
             ns = torch.from_numpy(
                 np.concatenate(ns, axis=0)
@@ -159,4 +166,4 @@ class DataPreprocess:
             np.concatenate(mask, axis=0)
         ).to(dtype=torch.float32, device=self.device)
 
-        return s, ns, a, t, rtg, mask
+        return s, norm_s, ns, a, t, rtg, mask
