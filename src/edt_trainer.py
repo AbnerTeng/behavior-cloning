@@ -114,6 +114,7 @@ class EDTTrainer:
         state_size: int,
         action_size: int,
         state_test: torch.Tensor,
+        state_test_denorm: torch.Tensor,
         rtg_target: int = 1,
         # heuristic: bool = False,
         top_percentile: float = 0.15,
@@ -129,11 +130,12 @@ class EDTTrainer:
         test the model
 
         state_test.shape -> shape(290, 4) at year 2011
+        state_test_denorm.shape -> shape(290, 4) at year 2011
         state_size: (int) -> 4
         action_size: (int) -> 4
         trg: (int) -> 1
         """
-        env = TradeEnv(state_test)
+        env = TradeEnv(state_test, state_test_denorm)
         eval_batch_size = 1
         num_eval_ep = 1
         total_reward = 0
