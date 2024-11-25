@@ -11,7 +11,7 @@ class TradeEnv(gym.Env):
     - Action space: 4 - long, sell, short, and buy_to_cover
     - Reward is defined by the user based on the trading strategy
 
-    - data shape: (2xx, 4)
+    - data shape: (2xx, 4) - 2xx trading days of OHLC data
     """
     def __init__(self, data, denorm_data, initial_balance: int = 1000000):
         super().__init__()
