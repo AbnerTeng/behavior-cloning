@@ -16,7 +16,7 @@ from .utils.return_search import (
     return_search,
     # return_search_heuristic
 )
-from .env.trade_env import TradeEnv
+from .trade_env.trade_env import TradeEnv
 
 
 class EDTTrainer:
