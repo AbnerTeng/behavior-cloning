@@ -1,15 +1,15 @@
 """
 Search for the best action
 """
-from typing import Optional, Tuple
 import math
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
 from torch import nn
 from torch.distributions.categorical import Categorical
 
-from ..model.edt_model import ElasticDecisionTransformer
+from ..model.model import ElasticDecisionTransformer
 
 
 def sample_from_logits(
@@ -191,122 +191,123 @@ def return_search(
     return best_act, context_len - best_i
 
 
-# def return_search_heuristic(
-#     model,
-#     timesteps,
-#     states,
-#     actions,
-#     rewards_to_go,
-#     rewards,
-#     context_len,
-#     t,
-#     top_percentile,
-#     expert_weight,
-#     mgdt_sampling=False,
-#     rs_steps=2,
-#     rs_ratio=1,
-#     real_rtg=False,
-#     heuristic_delta=1,
-#     previous_index=None,
-# ):
+def return_search_heuristic(
+    model: ElasticDecisionTransformer,
+    timesteps: torch.Tensor,
+    states: torch.Tensor,
+    actions: torch.Tensor,
+    rewards_to_go: torch.Tensor,
+    context_len: int,
+    t: int,
+    top_percentile: float,
+    expert_weight: float,
+    mgdt_sampling: bool = False,
+    rs_steps: int = 2,
+    rs_ratio: int = 1,
+    real_rtg: bool = False,
+    heuristic_delta: int = 1,
+    previous_index: bool = None,
+) -> Tuple[torch.Tensor, int]:
 
-#     # B x T x 1?
-#     highest_ret = -999
-#     best_i = 0
-#     best_act = None
+    # B x T x 1?
+    highest_ret, best_i, best_act = -999, 0, None
 
-#     if t < context_len:
-#         for i in range(0, math.ceil((t + 1)/rs_ratio), rs_steps):
-#             _, act_preds, ret_preds, imp_ret_preds, _ = model.get_action(
-#                 timesteps[:, i : context_len + i],
-#                 states[:, i : context_len + i],
-#                 actions[:, i : context_len + i],
-#                 rewards_to_go[:, i : context_len + i],
-#                 rewards[:, i : context_len + i],
-#             )
+    if t < context_len:
+        for i in range(0, math.ceil((t + 1)/rs_ratio), rs_steps):
+            act_preds, ret_preds, imp_ret_preds = model.get_action(
+                states[:, i : context_len + i],
+                actions[:, i : context_len + i],
+                rewards_to_go[:, i : context_len + i],
+                timesteps[:, i : context_len + i]
+            )
+            act_preds = nn.Sigmoid()(act_preds)
 
-#             if mgdt_sampling:
-#                 opt_rtg = expert_sampling(
-#                     mgdt_logits(ret_preds),
-#                     top_percentile=top_percentile,
-#                     expert_weight=expert_weight,
-#                 )
+            if mgdt_sampling:
+                opt_rtg = expert_sampling(
+                    mgdt_logits(ret_preds),
+                    top_percentile=top_percentile,
+                    expert_weight=expert_weight,
+                )
 
-#                 # we should estimate it again with the estimated rtg
-#                 _, act_preds, ret_preds, imp_ret_preds_pure, _ = model.get_action(
-#                     timesteps[:, i : context_len + i],
-#                     states[:, i : context_len + i],
-#                     actions[:, i : context_len + i],
-#                     opt_rtg,
-#                     rewards[:, i : context_len + i],
-#                 )
+                # we should estimate it again with the estimated rtg
+                act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
+                    states[:, i : context_len + i],
+                    actions[:, i : context_len + i],
+                    opt_rtg,
+                    timesteps[:, i : context_len + i],
+                )
 
-#             else:
-#                 _, act_preds, ret_preds, imp_ret_preds_pure, _ = model.get_action(
-#                     timesteps[:, i : context_len + i],
-#                     states[:, i : context_len + i],
-#                     actions[:, i : context_len + i],
-#                     imp_ret_preds,
-#                     rewards[:, i : context_len + i],
-#                 )
+            else:
+                act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
+                    states[:, i : context_len + i],
+                    actions[:, i : context_len + i],
+                    imp_ret_preds, 
+                    timesteps[:, i : context_len + i],
+                )
 
-#             if not real_rtg:
-#                 imp_ret_preds = imp_ret_preds_pure
+            if not real_rtg:
+                imp_ret_preds = imp_ret_preds_pure
 
-#             ret_i = imp_ret_preds[:, t - i].detach().item()
-#             if ret_i > highest_ret:
-#                 highest_ret = ret_i
-#                 best_i = i
-#                 best_act = act_preds[0, t - i].detach()
+            ret_i = imp_ret_preds[:, t - i].detach().item()
+
+            if ret_i > highest_ret:
+                highest_ret = ret_i
+                best_i = i
+                # best_act = act_preds[0, t - i].detach()
+                best_act = act_preds.detach()
 
 
-#     else: # t >= context_len
-#         prev_best_index = context_len - previous_index
+    else: # t >= context_len
+        prev_best_index = context_len - previous_index
 
-#         for i in range(prev_best_index-heuristic_delta, prev_best_index+1+heuristic_delta):
-#             if i < 0 or i >= context_len:
-#                 continue
-#             _, act_preds, ret_preds, imp_ret_preds, _ = model.get_action(
-#                 timesteps[:, t - context_len + 1 + i : t + 1 + i],
-#                 states[:, t - context_len + 1 + i : t + 1 + i],
-#                 actions[:, t - context_len + 1 + i : t + 1 + i],
-#                 rewards_to_go[:, t - context_len + 1 + i : t + 1 + i],
-#                 rewards[:, t - context_len + 1 + i : t + 1 + i],
-#             )
+        for i in range(
+            int(prev_best_index - heuristic_delta),
+            int(prev_best_index + 1 + heuristic_delta)
+        ):
+            if i < 0 or i >= context_len:
+                continue
 
-#             # first sample return with optimal weight
-#             if mgdt_sampling:
-#                 opt_rtg = expert_sampling(
-#                     mgdt_logits(ret_preds),
-#                     top_percentile=top_percentile,
-#                     expert_weight=expert_weight,
-#                 )
+            act_preds, ret_preds, imp_ret_preds = model.get_action(
+                states[:, t - context_len + 1 + i : t + 1 + i],
+                actions[:, t - context_len + 1 + i : t + 1 + i],
+                rewards_to_go[:, t - context_len + 1 + i : t + 1 + i],
+                timesteps[:, t - context_len + 1 + i : t + 1 + i],
+            )
+            act_preds = nn.Sigmoid()(act_preds)
 
-#                 # we should estimate the results again with the estimated return
-#                 _, act_preds, ret_preds, imp_ret_preds_pure, _ = model.get_action(
-#                     timesteps[:, t - context_len + 1 + i : t + 1 + i],
-#                     states[:, t - context_len + 1 + i : t + 1 + i],
-#                     actions[:, t - context_len + 1 + i : t + 1 + i],
-#                     opt_rtg,
-#                     rewards[:, t - context_len + 1 + i : t + 1 + i],
-#                 )
+            # first sample return with optimal weight
+            if mgdt_sampling:
+                opt_rtg = expert_sampling(
+                    mgdt_logits(ret_preds),
+                    top_percentile=top_percentile,
+                    expert_weight=expert_weight,
+                )
 
-#             else:
-#                 _, act_preds, ret_preds, imp_ret_preds_pure, _ = model.get_action(
-#                     timesteps[:, t - context_len + 1 + i : t + 1 + i],
-#                     states[:, t - context_len + 1 + i : t + 1 + i],
-#                     actions[:, t - context_len + 1 + i : t + 1 + i],
-#                     imp_ret_preds,
-#                     rewards[:, t - context_len + 1 + i : t + 1 + i],
-#                 )
+                # we should estimate the results again with the estimated return
+                act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
+                    states[:, t - context_len + 1 + i : t + 1 + i],
+                    actions[:, t - context_len + 1 + i : t + 1 + i],
+                    opt_rtg,
+                    timesteps[:, t - context_len + 1 + i : t + 1 + i],
+                )
 
-#             if not real_rtg:
-#                 imp_ret_preds = imp_ret_preds_pure
+            else:
+                act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
+                    states[:, t - context_len + 1 + i : t + 1 + i],
+                    actions[:, t - context_len + 1 + i : t + 1 + i],
+                    imp_ret_preds,
+                    timesteps[:, t - context_len + 1 + i : t + 1 + i],
+                )
 
-#             ret_i = imp_ret_preds[:, -1 - i].detach().item()
-#             if ret_i > highest_ret:
-#                 highest_ret = ret_i
-#                 best_i = i
-#                 best_act = act_preds[0, -1 - i].detach()
+            if not real_rtg:
+                imp_ret_preds = imp_ret_preds_pure
 
-#     return best_act, context_len - best_i
+            ret_i = imp_ret_preds[:, -1 - i].detach().item()
+
+            if ret_i > highest_ret:
+                highest_ret = ret_i
+                best_i = i
+                # best_act = act_preds[0, -1 - i].detach()
+                best_act = act_preds.detach()
+
+    return best_act, context_len - best_i

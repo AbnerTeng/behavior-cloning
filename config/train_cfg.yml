@@ -1,8 +1,15 @@
-device: 0
+state_with_vol: false
+model: edt
+mode: train
+device: 3
 seed_number: 42
-start_year: 2010
-end_year: 2025
-gamma: 0.99
+expr: synthetic_all_rsi
+k: 17
+heuristic_search: true
+year_range:
+  - 2010
+  - 2025
+gamma: 0.95
 
 train:
   max_len: 20
@@ -10,3 +17,9 @@ train:
   hidden_size: 128
   epochs: 200
   target_return: 1
+
+optimizer:
+  lr: 1e-4
+  weight_decay: 1e-4
+
+

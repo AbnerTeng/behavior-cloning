@@ -1,38 +1,18 @@
 """
 Dataset creation module
 """
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .utils.utils import (
-    min_max_norm,
-    count_return_to_go
-)
+from .utils.utils import count_return_to_go, min_max_norm
 
 
 class TradeLogDataset(Dataset):
     """
     Dataset of trading logs
-    """
-
-    def __init__(self, *args) -> None:
-        self.data = args
-
-    def __len__(self) -> int:
-        return len(self.data[0])
-
-    def __getitem__(self, idx: int) -> Tuple:
-        return tuple(
-            d[idx] for d in self.data
-        )
-
-
-class EDTTradeLogDataset(Dataset):
-    """
-    Dataset of Elastic Decision Transformer trading logs
     """
 
     def __init__(self, *args) -> None:
@@ -63,16 +43,15 @@ class DataPreprocess:
         max_len: int,
         state_size: int,
         action_size: int,
+        device: str,
         gamma: float = 0.99,
     ) -> None:
         self.max_length = max_len
         self.max_ep_len = 4096
         self.state_size = state_size
         self.action_size = action_size
+        self.device = device
         self.gamma = gamma
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        )
 
     def split_data(
         self,
