@@ -2,13 +2,13 @@
 self-generated dataset preparation code
 """
 import os
+import pickle
 import warnings
 from typing import Dict, List, Tuple
-import pickle
 
-from rich.progress import track
 import numpy as np
 import pandas as pd
+from rich.progress import track
 
 warnings.filterwarnings("ignore")
 
@@ -82,7 +82,7 @@ class PrepareDataset:
         """
         raise NotImplementedError
 
-    def run(self, state_with_vol: bool, get_next_state: bool, k: int = 17) -> Dict[str, Dict[str, np.ndarray]]:
+    def run(self, state_with_vol: bool, k: int = 17) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Run the dataset preparation code, and get the top k return strategies
         """
@@ -107,10 +107,9 @@ class PrepareDataset:
                 "timestep": self.state_data['Date'].to_numpy()
             }
 
-            if get_next_state:
-                self.trajectories[log]["next_state"] = self.state_data.drop(
-                    columns=['Date', 'Adj Close', 'Volume'] if not state_with_vol else ['Date', 'Adj Close']
-                ).shift(periods=-1).to_numpy()
+            self.trajectories[log]["next_state"] = self.state_data.drop(
+                columns=['Date', 'Adj Close', 'Volume'] if not state_with_vol else ['Date', 'Adj Close']
+            ).shift(periods=-1).to_numpy()
 
         cum_rets = {key: value['return'].cumsum()[-1] for key, value in self.trajectories.items()}
         cum_rets = sorted(cum_rets.items(), key=lambda x: x[1], reverse=True)[:k]

@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Union
-import yaml
+
+from omegaconf import OmegaConf
 import numpy as np
 import torch
 
@@ -8,10 +9,18 @@ def load_config(cfg_path: str) -> Dict[str, Any]:
     """
     Load configuration file
     """
-    with open(cfg_path, 'r', encoding="utf-8") as cfg:
-        config = yaml.safe_load(cfg)
+    config = OmegaConf.load(cfg_path)
 
     return config
+
+
+def set_all_seed(seed: int) -> None:
+    """
+    Set seed
+    """
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed(seed)
 
 
 def min_max_norm(x: np.ndarray) -> np.ndarray:
@@ -28,6 +37,15 @@ def min_max_norm(x: np.ndarray) -> np.ndarray:
         normed_array[strat] = (x[strat] - min_val) / (max_val - min_val)
 
     return normed_array
+
+
+def expectile_loss(diff: torch.Tensor, expectile: float = 0.99) -> torch.Tensor:
+    """
+    diff (torch.Tensor): difference between the target and the imp_loss_return
+    expectile (float): expectile value (default: 0.99)
+    """
+    weight = torch.where(diff > 0, expectile, (1 - expectile))
+    return weight * (diff ** 2)
 
 
 def count_return_to_go(returns: np.ndarray, gamma: float) -> np.ndarray:

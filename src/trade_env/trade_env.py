@@ -1,5 +1,8 @@
+from typing import Optional, Tuple
+
 import gym
 import numpy as np
+import torch
 
 
 class TradeEnv(gym.Env):
@@ -13,7 +16,12 @@ class TradeEnv(gym.Env):
 
     - data shape: (2xx, 4) - 2xx trading days of OHLC data
     """
-    def __init__(self, data, denorm_data, initial_balance: int = 1000000):
+    def __init__(
+        self,
+        data: torch.Tensor,
+        denorm_data: Optional[torch.Tensor],
+        initial_balance: int = 1000000
+    ) -> None:
         super().__init__()
         self.data = data
         self.denorm_data = denorm_data
@@ -21,7 +29,7 @@ class TradeEnv(gym.Env):
         self.balance = initial_balance
         self.current_idx = 20
         self.shares_held = 0
-        self.trans_cost = 0.001
+        self.trans_cost = 0.000  # 0.001
         self.have_position = False
         self.prev_act = None
         self.state_space = self.define_state_space()
@@ -47,7 +55,7 @@ class TradeEnv(gym.Env):
 
         return gym.spaces.Dict(state_space)
 
-    def step(self, action: int):
+    def step(self, action: int) -> Tuple[torch.Tensor, float, bool, dict]:
         """
         Args:
             action (int): arg-maxed action from the model
@@ -108,17 +116,17 @@ class TradeEnv(gym.Env):
 
         return obs, dr, done, {}
 
-    def reset(self):
+    def reset(self) -> torch.Tensor:
         self.current_idx = 0
         self.balance = self.initial_balance
         self.shares_held = 0
 
         return self.get_observation()
 
-    def get_observation(self):
+    def get_observation(self) -> torch.Tensor:
         return self.data[self.current_idx: self.current_idx + 20]
 
-    def calculate_reward(self):
+    def calculate_reward(self) -> float:
         new_portfolio_value = self.balance + (
             self.shares_held * self.denorm_data[self.current_idx + 1, -1, -1]
         )
