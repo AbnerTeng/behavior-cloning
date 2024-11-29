@@ -33,7 +33,7 @@ def get_args() -> Namespace:
         action="store_true"
     )
     parser.add_argument(
-        "--mode", '-m', type=str, default="test"
+        "--mode", '-m', type=str, default="train"
     )
     parser.add_argument(
         "--k", type=int, default=17
