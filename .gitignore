@@ -1,10 +1,16 @@
 # vscode debugger folder
-.vscode/*
+.vscode/launch.json
+
+# expr notebooks
+
+notebooks/check_traj.ipynb
+notebooks/clean.ipynb
 
 # model folder
 synthetic_all_rsi_model_weights/
 synthetic_all_rsi_act_weights/
 
+# MacOS file
 
 .DS_Store
 
