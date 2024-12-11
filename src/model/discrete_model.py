@@ -3,12 +3,13 @@ from typing import Tuple
 import torch
 from torch import nn
 
+from ..utils.utils import binary_transfer
 from ..base.base_dt import BaseDecisionTransformer
 
 
-class DecisionTransformer(BaseDecisionTransformer):
+class DiscreteDT(BaseDecisionTransformer):
     """
-    Decision transformer model with discrete action space
+    Decision transformer model with discrete action space v2
 
     Args:
         state_size: int -> dimension of the state
@@ -16,14 +17,23 @@ class DecisionTransformer(BaseDecisionTransformer):
         hidden_size: int -> dimension of the hidden layer
     """
 
-    def __init__(self, state_size: int, action_size: int, hidden_size: int) -> None:
+    def __init__(self, state_size, action_size, hidden_size) -> None:
         super().__init__(state_size, action_size, hidden_size)
-        self.embed_action = nn.Linear(self.action_size, self.hidden_size)
+        # self.embed_action = nn.Linear(self.action_size, self.hidden_size)
+        self.embed_action = nn.Sequential(
+            # nn.Embedding(2 ** self.action_size, self.hidden_size),
+            nn.Embedding(5, self.hidden_size),
+            nn.Tanh(),
+        )
+        nn.init.normal_(self.embed_action[0].weight, mean=0.0, std=0.2)
         self.predict_state = nn.Linear(self.hidden_size, self.state_size)
         self.predict_return = nn.Linear(self.hidden_size, 1)
+        action_tanh = False
         self.predict_action = nn.Sequential(
-            nn.Linear(self.hidden_size, self.action_size),
-            # nn.Sigmoid(),
+            *(
+                [nn.Linear(self.hidden_size, self.action_size)]
+                + ([nn.Tanh()] if action_tanh else [])
+            )
         )
 
     def forward(
@@ -51,6 +61,7 @@ class DecisionTransformer(BaseDecisionTransformer):
         state_embeddings = (
             self.embed_state(state) + time_embeddings
         )  # (batch_size, seq_length, hidden_size)
+        action = binary_transfer(action)
         action_embeddings = (
             self.embed_action(action) + time_embeddings
         )  # (batch_size, seq_length, hidden_size)
@@ -120,17 +131,9 @@ class DecisionTransformer(BaseDecisionTransformer):
         return action_pred[0, -1]
 
 
-class ElasticDecisionTransformer(BaseDecisionTransformer):
+class DiscreteEDT(BaseDecisionTransformer):
     """
-    Elastic decision transformer model
-
-    Args:
-        state_size: int -> dimension of the state
-        action_size: int -> dimension of the action
-        hidden_size: int -> dimension of the hidden layer
-        num_inputs: int -> number of inputs (S, R, A)
-        num_bin: int -> number of bins
-        is_continuous: bool -> continuous action space or not
+    EDT for discrete action space
     """
 
     def __init__(
@@ -140,20 +143,14 @@ class ElasticDecisionTransformer(BaseDecisionTransformer):
         hidden_size: int,
         num_inputs: int,
         num_bin: int,
-        is_continuous: bool = True,
+        is_continuous: bool = False,
     ) -> None:
         super().__init__(state_size, action_size, hidden_size)
         self.num_inputs = num_inputs
         self.is_continuous = is_continuous
 
-        # discrete actions
-        if not self.is_continuous:
-            self.embed_action = nn.Embedding(self.action_size, self.hidden_size)
-
-        else:
-            self.embed_action = nn.Linear(self.action_size, self.hidden_size)
-
-        # prediction heads
+        # self.embed_action = torch.nn.Embedding(action_size, hidden_size)
+        self.embed_action = torch.nn.Embedding(5, hidden_size)
         self.predict_state = nn.Linear(
             self.hidden_size + self.action_size, self.state_size
         )
@@ -163,7 +160,6 @@ class ElasticDecisionTransformer(BaseDecisionTransformer):
             *(
                 [nn.Linear(self.hidden_size, self.action_size)]
                 + ([nn.Tanh()] if self.is_continuous else [])
-                # + ([nn.Sigmoid()] if self.is_continuous else [])
             )
         )
         self.predict_reward = nn.Linear(self.hidden_size, 1)
@@ -183,6 +179,7 @@ class ElasticDecisionTransformer(BaseDecisionTransformer):
                 state.device
             )
 
+        action = binary_transfer(action)
         time_embeddings = self.embed_timestep(timesteps)
         state_embeddings = self.embed_state(state) + time_embeddings
         action_embeddings = self.embed_action(action) + time_embeddings

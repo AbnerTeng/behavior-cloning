@@ -1,6 +1,7 @@
 """
 Search for the best action
 """
+
 import math
 from typing import Optional, Tuple
 
@@ -9,21 +10,17 @@ import torch
 from torch import nn
 from torch.distributions.categorical import Categorical
 
-from ..model.model import ElasticDecisionTransformer
-
 
 def sample_from_logits(
     logits: torch.Tensor,
     temperature: Optional[float] = 1e0,
-    top_percentile: Optional[float] = None
+    top_percentile: Optional[float] = None,
 ) -> torch.Tensor:
     """
     sampling logits with temperature and top_percentile
     """
     if top_percentile is not None:
-        percentile = torch.quantile(
-            logits, top_percentile, axis=-1, keepdim=True
-        )
+        percentile = torch.quantile(logits, top_percentile, dim=-1, keepdim=True)
         logits = torch.where(logits >= percentile, logits, -np.inf)
 
     m = Categorical(logits=temperature * logits)
@@ -35,23 +32,23 @@ def expert_sampling(
     logits: torch.Tensor,
     temperature: Optional[float] = 1e0,
     top_percentile: Optional[float] = None,
-    expert_weight: Optional[float] = 10
+    expert_weight: Optional[float] = 10,
 ) -> torch.Tensor:
     """
     Sample from expert policy
     """
     batch_size, seq_length, num_bin = logits.shape
     expert_logits = (
-        torch.linspace(0, 1, num_bin).repeat(batch_size, seq_length, 1).to(logits.device)
+        torch.linspace(0, 1, num_bin)
+        .repeat(batch_size, seq_length, 1)
+        .to(logits.device)
     )
     return sample_from_logits(
         logits + expert_weight * expert_logits, temperature, top_percentile
     )
 
 
-def mgdt_logits(
-    logits: torch.Tensor, opt_weight: Optional[int] = 10
-) -> torch.Tensor:
+def mgdt_logits(logits: torch.Tensor, opt_weight: Optional[int] = 10) -> torch.Tensor:
     logits_opt = torch.linspace(0.0, 1.0, logits.shape[-1]).to(logits.device)
     logits_opt = logits_opt.repeat(logits.shape[1], 1).unsqueeze(0)
 
@@ -59,7 +56,7 @@ def mgdt_logits(
 
 
 def return_search(
-    model: ElasticDecisionTransformer,
+    model: nn.Module,
     timesteps: torch.Tensor,
     states: torch.Tensor,
     actions: torch.Tensor,
@@ -70,9 +67,9 @@ def return_search(
     expert_weight: float,
     mgdt_sampling: bool = False,
     rs_steps: int = 2,
-    rs_ratio: int = 1,
+    rs_ratio: float = 1.0,
     real_rtg: bool = False,
-) -> Tuple[torch.Tensor, int]:
+) -> Tuple[Optional[torch.Tensor], int]:
     """
     Search for the T for maximizing the return to go
 
@@ -99,7 +96,7 @@ def return_search(
     highest_ret, best_i, best_act = -999, 0, None
 
     if t < context_len:
-        for i in range(0, math.ceil((t + 1)/rs_ratio), rs_steps):
+        for i in range(0, math.ceil((t + 1) / rs_ratio), rs_steps):
             act_preds, ret_preds, imp_ret_preds = model.get_action(
                 states[:, i : context_len + i],
                 actions[:, i : context_len + i],
@@ -143,9 +140,8 @@ def return_search(
                 # best_act = act_preds[0, t - i].detach()
                 best_act = act_preds.detach()
 
-
     else:
-        for i in range(0, math.ceil(context_len/rs_ratio), rs_steps):
+        for i in range(0, math.ceil(context_len / rs_ratio), rs_steps):
             act_preds, ret_preds, imp_ret_preds = model.get_action(
                 states[:, t - context_len + 1 + i : t + 1 + i, :],
                 actions[:, t - context_len + 1 + i : t + 1 + i, :],
@@ -192,7 +188,7 @@ def return_search(
 
 
 def return_search_heuristic(
-    model: ElasticDecisionTransformer,
+    model: nn.Module,
     timesteps: torch.Tensor,
     states: torch.Tensor,
     actions: torch.Tensor,
@@ -203,22 +199,21 @@ def return_search_heuristic(
     expert_weight: float,
     mgdt_sampling: bool = False,
     rs_steps: int = 2,
-    rs_ratio: int = 1,
+    rs_ratio: float = 1.0,
     real_rtg: bool = False,
     heuristic_delta: int = 1,
-    previous_index: bool = None,
-) -> Tuple[torch.Tensor, int]:
-
+    previous_index: Optional[int] = None,
+) -> Tuple[Optional[torch.Tensor], int]:
     # B x T x 1?
     highest_ret, best_i, best_act = -999, 0, None
 
     if t < context_len:
-        for i in range(0, math.ceil((t + 1)/rs_ratio), rs_steps):
+        for i in range(0, math.ceil((t + 1) / rs_ratio), rs_steps):
             act_preds, ret_preds, imp_ret_preds = model.get_action(
                 states[:, i : context_len + i],
                 actions[:, i : context_len + i],
                 rewards_to_go[:, i : context_len + i],
-                timesteps[:, i : context_len + i]
+                timesteps[:, i : context_len + i],
             )
             act_preds = nn.Sigmoid()(act_preds)
 
@@ -241,7 +236,7 @@ def return_search_heuristic(
                 act_preds, ret_preds, imp_ret_preds_pure = model.get_action(
                     states[:, i : context_len + i],
                     actions[:, i : context_len + i],
-                    imp_ret_preds, 
+                    imp_ret_preds,
                     timesteps[:, i : context_len + i],
                 )
 
@@ -256,13 +251,15 @@ def return_search_heuristic(
                 # best_act = act_preds[0, t - i].detach()
                 best_act = act_preds.detach()
 
+    else:  # t >= context_len
+        if previous_index is None:
+            previous_index = 0
 
-    else: # t >= context_len
         prev_best_index = context_len - previous_index
 
         for i in range(
             int(prev_best_index - heuristic_delta),
-            int(prev_best_index + 1 + heuristic_delta)
+            int(prev_best_index + 1 + heuristic_delta),
         ):
             if i < 0 or i >= context_len:
                 continue

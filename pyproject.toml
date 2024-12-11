@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "behavior-cloning"
+version = "0.1.0"
+description = "Behavior cloning applied on Quant trading"
+authors = ["AbnerTeng <abnerteng16@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+numpy = "^2.1.3"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.10.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
