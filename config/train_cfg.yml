@@ -5,20 +5,21 @@ device: 3
 seed_number: 42
 expr: synthetic_all_rsi
 k: 17
-heuristic_search: true
+heuristic_search: false
 year_range:
   - 2010
   - 2025
-gamma: 0.95
+gamma: 0.99
+warmup_steps: 10000
 
 train:
   max_len: 20
   batch_size: 64
   hidden_size: 128
   epochs: 200
-  target_return: 1
+  target_return: 5
 
-optimizer:
+opt:
   lr: 1e-4
   weight_decay: 1e-4
 

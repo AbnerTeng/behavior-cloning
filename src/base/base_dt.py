@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from typing import Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -11,12 +12,7 @@ class BaseDecisionTransformer(nn.Module):
     Base class of decision transformer module
     """
 
-    def __init__(
-        self,
-        state_size: int,
-        action_size: int,
-        hidden_size: int
-    ) -> None:
+    def __init__(self, state_size: int, action_size: int, hidden_size: int) -> None:
         super().__init__()
         self.state_size = state_size
         self.action_size = action_size
@@ -26,7 +22,7 @@ class BaseDecisionTransformer(nn.Module):
             state_dim=self.state_size,
             act_dim=self.action_size,
             hidden_size=self.hidden_size,
-            max_ep_len=4096
+            max_ep_len=4096,
         )
         self.transformer = DecisionTransformerGPT2Model(config)
 
@@ -42,19 +38,14 @@ class BaseDecisionTransformer(nn.Module):
         action: torch.Tensor,
         timesteps: torch.Tensor,
         return_to_go: torch.Tensor,
-        attention_mask=None
-    ) -> None:
+        attention_mask=None,
+    ) -> Tuple:
         """
         forward pass
         """
         raise NotImplementedError
 
-    @abstractmethod
-    def loss_fn(
-        self,
-        action_pred: torch.Tensor,
-        action_target: torch.Tensor
-    ) -> None:
+    def loss_fn(self, action_pred: torch.Tensor, action_target: torch.Tensor) -> None:
         """
         Loss function
 
@@ -70,7 +61,7 @@ class BaseDecisionTransformer(nn.Module):
         action_pred = F.softmax(action_pred, dim=-1)
         action_pred = action_pred.permute(0, 2, 1)
         action_target = action_target.permute(0, 2, 1)
-        ce_loss = nn.CrossEntropyLoss()
+        ce_loss = nn.CrossEntropyLoss(reduction="sum")
         loss = ce_loss(action_pred, action_target)
 
         return loss
@@ -81,8 +72,8 @@ class BaseDecisionTransformer(nn.Module):
         state: torch.Tensor,
         action: torch.Tensor,
         return_to_go: torch.Tensor,
-        timesteps: torch.Tensor
-    ) -> None:
+        timesteps: torch.Tensor,
+    ) -> Union[float, Tuple[float, torch.Tensor, torch.Tensor]]:
         """
         get predicted action
         """

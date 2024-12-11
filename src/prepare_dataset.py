@@ -1,6 +1,7 @@
 """
 self-generated dataset preparation code
 """
+
 import os
 import pickle
 import warnings
@@ -32,27 +33,26 @@ class PrepareDataset:
     - return: np.array \in R^{day}
     - timestep: np.ndarray \in R^{day}
     """
-    def __init__(
-        self,
-        generate_data_dir: str,
-        state_data_dir: str
-    ) -> None:
+
+    def __init__(self, generate_data_dir: str, state_data_dir: str) -> None:
         self.generate_data_dir = generate_data_dir
         self.state_data_dir = state_data_dir
         self.state_data = pd.read_csv(self.state_data_dir)
-        self.action_types = ['long', 'sell', 'buytocover', 'short']
+        self.action_types = ["long", "sell", "buytocover", "short"]
         self.random_log = os.listdir(self.generate_data_dir)[0]
         self.trajectories = {}
 
-    def load_expert_log(self, log: str) -> Tuple[List[Dict[str, List[int]]], List[float], List[str]]:
+    def load_expert_log(
+        self, log: str
+    ) -> Tuple[List[Dict[str, List[int]]], List[float], List[str]]:
         """
         loading expert log from self-generated data
         """
-        with open(f"{self.generate_data_dir}/{log}", 'rb') as f:
+        with open(f"{self.generate_data_dir}/{log}", "rb") as f:
             data = pickle.load(f)
-            action = data['trade_log']
-            returns = data['return']
-            trade_timestep = data['date']
+            action = data["trade_log"]
+            returns = data["return"]
+            trade_timestep = data["date"]
 
         return action, returns, trade_timestep
 
@@ -73,7 +73,7 @@ class PrepareDataset:
 
     def store_return(self, returns: List[float]) -> np.ndarray:
         return_array = np.zeros(len(self.state_data))
-        return_array[len(self.state_data) - len(returns): ] = returns
+        return_array[len(self.state_data) - len(returns) :] = returns
         return return_array
 
     def padding(self, trajectory: Dict[str, np.array]) -> Dict[str, np.ndarray]:
@@ -82,11 +82,15 @@ class PrepareDataset:
         """
         raise NotImplementedError
 
-    def run(self, state_with_vol: bool, k: int = 17) -> Dict[str, Dict[str, np.ndarray]]:
+    def run(
+        self, state_with_vol: bool, k: int = 17
+    ) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Run the dataset preparation code, and get the top k return strategies
         """
-        strats_type = list(set(log.split("_")[0] for log in os.listdir(self.generate_data_dir)))
+        strats_type = list(
+            set(log.split("_")[0] for log in os.listdir(self.generate_data_dir))
+        )
         strats_type = [x for x in strats_type if "pkl" not in x]
 
         for log in track(os.listdir(self.generate_data_dir)):
@@ -101,18 +105,33 @@ class PrepareDataset:
             self.trajectories[log] = {
                 "action": action_array,
                 "state": self.state_data.drop(
-                    columns=['Date', 'Adj Close', 'Volume'] if not state_with_vol else ['Date', 'Adj Close']
+                    columns=["Date", "Adj Close", "Volume"]
+                    if not state_with_vol
+                    else ["Date", "Adj Close"]
                 ).to_numpy(),
                 "return": return_array,
-                "timestep": self.state_data['Date'].to_numpy()
+                "timestep": self.state_data["Date"].to_numpy(),
             }
 
-            self.trajectories[log]["next_state"] = self.state_data.drop(
-                columns=['Date', 'Adj Close', 'Volume'] if not state_with_vol else ['Date', 'Adj Close']
-            ).shift(periods=-1).to_numpy()
+            self.trajectories[log]["next_state"] = (
+                self.state_data.drop(
+                    columns=["Date", "Adj Close", "Volume"]
+                    if not state_with_vol
+                    else ["Date", "Adj Close"]
+                )
+                .shift(periods=-1)
+                .to_numpy()
+            )
 
-        cum_rets = {key: value['return'].cumsum()[-1] for key, value in self.trajectories.items()}
+        cum_rets = {
+            key: value["return"].cumsum()[-1]
+            for key, value in self.trajectories.items()
+        }
         cum_rets = sorted(cum_rets.items(), key=lambda x: x[1], reverse=True)[:k]
-        self.trajectories = {key: value for key, value in self.trajectories.items() if key in [x[0] for x in cum_rets]}
+        self.trajectories = {
+            key: value
+            for key, value in self.trajectories.items()
+            if key in [x[0] for x in cum_rets]
+        }
 
         return self.trajectories

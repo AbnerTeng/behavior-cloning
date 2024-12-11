@@ -1,11 +1,12 @@
-from typing import Any, Dict, List, Union
+import os
+from typing import Dict, List, Union
 
-from omegaconf import OmegaConf
+from omegaconf import ListConfig, OmegaConf, DictConfig
 import numpy as np
 import torch
 
 
-def load_config(cfg_path: str) -> Dict[str, Any]:
+def load_config(cfg_path: str) -> Union[DictConfig, ListConfig]:
     """
     Load configuration file
     """
@@ -21,6 +22,46 @@ def set_all_seed(seed: int) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.cuda.manual_seed(seed)
+
+
+def get_num_files(log_path: str) -> int:
+    """
+    Count logs inside a main subject
+    """
+    try:
+        count_files = len(os.listdir(f"trade_log/{log_path}"))
+
+    except FileNotFoundError:
+        count_files = 0
+
+    return count_files
+
+
+def binary_transfer(act: torch.Tensor) -> torch.Tensor:
+    """
+    Squeeze the binary action into 1-dim
+
+    Example: [n, m, 4] -> [n, m]
+
+    [0, 0, 0, 1] -> 1
+    [0, 1, 0, 0] -> 3
+    [0, 0, 0, 0] -> 0
+    """
+    action_space = [
+        (0, 0, 0, 0),
+        (0, 0, 0, 1),
+        (0, 0, 1, 0),
+        (0, 1, 0, 0),
+        (1, 0, 0, 0),
+    ]
+
+    act = torch.tensor(act, dtype=torch.int64)
+    action_to_index = {action: idx for idx, action in enumerate(action_space)}
+    indices = torch.tensor(
+        [[action_to_index[tuple(a.tolist())] for a in sequence] for sequence in act]
+    )
+
+    return indices
 
 
 def min_max_norm(x: np.ndarray) -> np.ndarray:
@@ -45,7 +86,7 @@ def expectile_loss(diff: torch.Tensor, expectile: float = 0.99) -> torch.Tensor:
     expectile (float): expectile value (default: 0.99)
     """
     weight = torch.where(diff > 0, expectile, (1 - expectile))
-    return weight * (diff ** 2)
+    return weight * (diff**2)
 
 
 def count_return_to_go(returns: np.ndarray, gamma: float) -> np.ndarray:
@@ -70,7 +111,7 @@ def compute_dr(
     have_position: bool,
     prev_act: int | None,
     trans_cost: float = 0.001,
-    portfolio_value: float = 1000000
+    portfolio_value: float = 1000000,
 ) -> float:
     """
     compute daily return
@@ -93,7 +134,9 @@ def compute_dr(
     share_today = np.floor(portfolio_value / close_today)
     cash_today = portfolio_value - share_today * close_today
     trans_cost_today = share_today * close_today * trans_cost
-    portfolio_value_tommorow = share_today * close_tomorrow + cash_today - trans_cost_today
+    portfolio_value_tommorow = (
+        share_today * close_tomorrow + cash_today - trans_cost_today
+    )
     long_dr = (portfolio_value_tommorow - portfolio_value) / portfolio_value
     short_dr = (-portfolio_value_tommorow + portfolio_value) / portfolio_value
 
@@ -115,7 +158,6 @@ def compute_dr(
 
     if have_position is True:
         if prev_act == 0:
-
             if action in [0, 2]:
                 have_position = True
                 prev_act = 0
@@ -127,7 +169,6 @@ def compute_dr(
                 dr = 0
 
         elif prev_act == 3:
-
             if action in [1, 3]:
                 have_position = True
                 prev_act = 3
@@ -141,10 +182,7 @@ def compute_dr(
         return dr, have_position, prev_act
 
 
-def get_start_year_idx(
-    year_list: List[int],
-    timesteps: np.ndarray
-) -> Dict[int, int]:
+def get_start_year_idx(year_list: List[int], timesteps: np.ndarray) -> Dict[int, int]:
     """
     Get the start index of each year
     """
@@ -163,7 +201,7 @@ def get_slicev2(
     data: List[Union[np.ndarray, torch.Tensor]],
     num_strats: int,
     start: int = 0,
-    end: int | None = None
+    end: int | None = None,
 ) -> List[Union[np.ndarray, torch.Tensor]]:
     """
     slice the data into length of training
@@ -174,9 +212,9 @@ def get_slicev2(
 
     for d in data:
         if end is not None:
-            output.append(d[(start * num_strats): (end * num_strats), :])
+            output.append(d[(start * num_strats) : (end * num_strats), :])
         else:
-            output.append(d[(start * num_strats):, :])
+            output.append(d[(start * num_strats) :, :])
 
     return output
 

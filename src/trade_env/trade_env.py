@@ -16,11 +16,12 @@ class TradeEnv(gym.Env):
 
     - data shape: (2xx, 4) - 2xx trading days of OHLC data
     """
+
     def __init__(
         self,
         data: torch.Tensor,
         denorm_data: Optional[torch.Tensor],
-        initial_balance: int = 1000000
+        initial_balance: int = 1000000,
     ) -> None:
         super().__init__()
         self.data = data
@@ -43,14 +44,11 @@ class TradeEnv(gym.Env):
             gym.spaces.Space: state space
         """
         state_space = {}
-        name = ['open', 'high', 'low', 'close']
+        name = ["open", "high", "low", "close"]
 
         for i, n in enumerate(name):
             state_space[n] = gym.spaces.Box(
-                low=0,
-                high=1,
-                shape=(self.data[i].shape[0], ),
-                dtype=np.float32
+                low=0, high=1, shape=(self.data[i].shape[0],), dtype=np.float32
             )
 
         return gym.spaces.Dict(state_space)
@@ -60,7 +58,9 @@ class TradeEnv(gym.Env):
         Args:
             action (int): arg-maxed action from the model
         """
-        close_today = self.denorm_data[self.current_idx, -1]  # 3 consists of the close price
+        close_today = self.denorm_data[
+            self.current_idx, -1
+        ]  # 3 consists of the close price
         close_next = self.denorm_data[self.current_idx + 1, -1]
 
         share_today = np.floor(self.balance / close_today)
@@ -87,7 +87,6 @@ class TradeEnv(gym.Env):
 
         if self.have_position is True:
             if self.prev_act == 0:
-
                 if action in [0, 2]:
                     self.have_position = True
                     self.prev_act = 0
@@ -99,7 +98,6 @@ class TradeEnv(gym.Env):
                     dr = 0
 
             elif self.prev_act == 3:
-
                 if action in [1, 3]:
                     self.have_position = True
                     self.prev_act = 3
@@ -124,14 +122,15 @@ class TradeEnv(gym.Env):
         return self.get_observation()
 
     def get_observation(self) -> torch.Tensor:
-        return self.data[self.current_idx: self.current_idx + 20]
+        return self.data[self.current_idx : self.current_idx + 20]
 
     def calculate_reward(self) -> float:
         new_portfolio_value = self.balance + (
             self.shares_held * self.denorm_data[self.current_idx + 1, -1, -1]
         )
         reward = new_portfolio_value - (
-            self.balance + (self.shares_held * self.denorm_data[self.current_idx, -1, -1])
+            self.balance
+            + (self.shares_held * self.denorm_data[self.current_idx, -1, -1])
         )
 
         return reward
