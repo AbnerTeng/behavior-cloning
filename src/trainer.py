@@ -3,7 +3,7 @@ Training process for the decision transformer model
 """
 
 import os
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
@@ -21,24 +21,12 @@ class Trainer(BaseTrainer):
     Decision transformer trainer
     """
 
-    def __init__(
-        self,
-        year: int,
-        model: Any,
-        max_len: int,
-        expr_name: str,
-        model_type: str,
-        is_elastic: bool = False,
-    ) -> None:
-        super().__init__(year, model, max_len, expr_name, model_type, is_elastic)
-
     def dt_train(
         self,
         data: torch.Tensor,
         device: str,
         total_sample: int,
         total_loss: float,
-        optimizer: torch.optim.Optimizer,
     ) -> Tuple[float, int]:
         (
             state_batch,
@@ -60,10 +48,10 @@ class Trainer(BaseTrainer):
 
         action_target = torch.clone(action_batch).detach()
         loss = self.model.loss_fn(action_pred, action_target)
-        optimizer.zero_grad()
+        self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.25)
-        optimizer.step()
+        self.optimizer.step()
         total_sample += state_batch.shape[0]
         total_loss += loss.item()
 
@@ -75,7 +63,6 @@ class Trainer(BaseTrainer):
         device: str,
         total_sample: int,
         total_loss: float,
-        optimizer: torch.optim.Optimizer,
         expectile: float = 0.99,
         state_loss_weight: float = 1.0,
         exp_loss_weight: float = 0.5,
@@ -117,10 +104,10 @@ class Trainer(BaseTrainer):
                 + return_loss * ce_weight
             )
 
-        optimizer.zero_grad()
+        self.optimizer.zero_grad()
         edt_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.25)
-        optimizer.step()
+        self.optimizer.step()
         total_sample += state_batch.shape[0]
         total_loss += edt_loss.item()
 
@@ -130,7 +117,6 @@ class Trainer(BaseTrainer):
     def dt_test(
         self,
         device: str,
-        expr_name: str,
         state_size: int,
         action_size: int,
         state_test: torch.Tensor,
@@ -141,7 +127,7 @@ class Trainer(BaseTrainer):
         """
         self.model.load_state_dict(
             torch.load(
-                f"ckpts/{self.model_type}/{expr_name}_model_weights/{self.year}_len{self.max_len}.pth"
+                f"{self.folder_name}/{self.expr_name}_model_weights/{self.year}_len{self.max_len}.pth"
             )
         )
         self.model.eval()
@@ -209,18 +195,17 @@ class Trainer(BaseTrainer):
                         dim=1,
                     )
 
-        if f"{expr_name}_act_weights" not in os.listdir(f"ckpts/{self.model_type}"):
-            os.mkdir(f"ckpts/{self.model_type}/{expr_name}_act_weights")
+        if f"{self.expr_name}_act_weights" not in os.listdir(f"{self.folder_name}"):
+            os.mkdir(f"{self.folder_name}/{self.expr_name}_act_weights")
 
         np.save(
-            f"ckpts/{self.model_type}/{expr_name}_act_weights/dt_weights_{self.year}_len{self.max_len}_{trg}",
+            f"{self.folder_name}/{self.expr_name}_act_weights/dt_weights_{self.year}_len{self.max_len}_{trg}",
             np.array(dt_weights),
         )
 
     def edt_test(
         self,
         device: str,
-        expr_name: str,
         state_size: int,
         action_size: int,
         state_test: torch.Tensor,
@@ -257,7 +242,7 @@ class Trainer(BaseTrainer):
         timesteps = timesteps.repeat(eval_batch_size, 1).to(device)
         self.model.load_state_dict(
             torch.load(
-                f"ckpts/{self.model_type}/{expr_name}_model_weights/{self.year}_len{self.max_len}.pth"
+                f"{self.folder_name}/{self.expr_name}_model_weights/{self.year}_len{self.max_len}.pth"
             )
         )
         self.model.eval()
@@ -294,8 +279,8 @@ class Trainer(BaseTrainer):
                 )
 
                 # initialize episode
-                initial_state = env.reset()  # assume it's a (20, 4) matrix
-                running_state = initial_state[:19, :]
+                initial_state = env.reset()  # assume it's a (20, 4 / 5) matrix
+                running_state = initial_state
                 running_reward = 0
                 running_rtg = rtg_target
 
@@ -303,7 +288,7 @@ class Trainer(BaseTrainer):
                     range(state_test.shape[0] - self.max_len),
                     description=f"Test [{self.year}]",
                 ):
-                    states[0, t : t + 19] = running_state
+                    states[0, t : t + 20] = running_state
                     running_rtg -= running_reward
                     rewards_to_go[0, t] = running_rtg
                     rewards[0, t] = running_reward
@@ -341,19 +326,20 @@ class Trainer(BaseTrainer):
                             rs_steps=rs_steps,
                             rs_ratio=rs_ratio,
                             real_rtg=real_rtg,
-                            heuristic_delta=heuristic_delta,
+                            heuristic_delta=int(heuristic_delta),
                             previous_index=previous_index,
                         )
                         previous_index = best_index
-
-                    indices.append(best_index)
+                        indices.append(best_index)
 
                     new_state, running_reward, done, _ = env.step(
-                        np.argmax(action_pred).item()
+                        np.argmax(action_pred.cpu()).item()
                     )
                     last_state = new_state[-1:, :]
-                    running_state = torch.cat([running_state[1:], last_state], dim=0)
-                    actions[0, t] = action_pred
+                    running_state = torch.cat(
+                        [running_state[1:], torch.unsqueeze(last_state, 0)], dim=0
+                    )
+                    actions[0, t] = F.softmax(action_pred)
                     total_reward += running_reward
                     edt_weights.append(action_pred.tolist())
 
@@ -361,14 +347,14 @@ class Trainer(BaseTrainer):
                         break
 
         if heuristic:
-            act_file_name = f"{expr_name}_act_weights_hs"
+            act_file_name = f"{self.expr_name}_act_weights_hs"
         else:
-            act_file_name = f"{expr_name}_act_weights"
+            act_file_name = f"{self.expr_name}_act_weights"
 
-        if act_file_name not in os.listdir(f"ckpts/{self.model_type}"):
-            os.mkdir(f"ckpts/{self.model_type}/{act_file_name}")
+        if act_file_name not in os.listdir(f"{self.folder_name}"):
+            os.mkdir(f"{self.folder_name}/{act_file_name}")
 
         np.save(
-            f"ckpts/{self.model_type}/{act_file_name}/edt_weights_{self.year}_len{self.max_len}_{rtg_target}",
+            f"{self.folder_name}/{act_file_name}/edt_weights_{self.year}_len{self.max_len}_{rtg_target}",
             np.array(edt_weights),
         )

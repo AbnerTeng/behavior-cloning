@@ -7,11 +7,11 @@ import os
 from argparse import ArgumentParser, Namespace
 import numpy as np
 import torch
-from rich import print as rp
 from torch.utils.data import DataLoader
 from torch import optim
+from rich import print as rp
 
-from .create_dataset import (
+from .dataset.create_dataset import (
     DataPreprocess,
     TradeLogDataset,
 )
@@ -21,7 +21,7 @@ from .model import (
     DiscreteDT,
     DiscreteEDT,
 )
-from .prepare_dataset import PrepareDataset
+from .dataset.prepare_dataset import PrepareDataset
 from .trainer import Trainer
 from .utils.utils import (
     get_slicev2,
@@ -37,20 +37,26 @@ def get_args() -> Namespace:
     parser = ArgumentParser()
     parser.add_argument("--expr", type=str, default="synthetic_all_rsi")
     parser.add_argument("--discrete", action="store_true", default=True)
+    parser.add_argument("--model", type=str, default="edt")
+    parser.add_argument("--mode", type=str, default="train")
+    parser.add_argument("--gpu", type=int, default=0)
+
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = get_args()
     cfg = load_config("config/train_cfg.yml")
-    cfg.expr = args.expr
-    cfg.k = get_num_files(cfg.expr)
-    DEVICE = f"cuda:{cfg.device}" if torch.cuda.is_available() else "cpu"
+    with_vol = "with_vol" if cfg.state_with_vol else "without_vol"
+    discrete = "disc" if args.discrete else "cont"
+    folder_name = f"ckpts/{args.model}_{with_vol}_{discrete}"
+    num_files = get_num_files(args.expr)
+    DEVICE = f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu"
     set_all_seed(cfg.seed_number)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    prepare_instance = PrepareDataset(f"trade_log/{cfg.expr}", "env_data/sp500.csv")
-    trajectories = prepare_instance.run(cfg.state_with_vol, k=cfg.k)
+    prepare_instance = PrepareDataset(f"trade_log/{args.expr}", cfg.env_data)
+    trajectories = prepare_instance.run(cfg.state_with_vol, k=num_files)
     new_trajectories = {}
     keys = ["state", "next_state", "action", "return", "timestep"]
 
@@ -82,13 +88,13 @@ if __name__ == "__main__":
 
         t_train, norm_s_train, ns_train, a_train, r_train = get_slicev2(
             [timestep, norm_state, next_state, action, returntogo],
-            cfg.k,
+            num_files,
             start=0,
             end=train_len,
         )
         t_test, s_test, norm_s_test, ns_test, a_test, r_test = get_test_slicev2(
             [timestep, state, norm_state, next_state, action, returntogo],
-            cfg.k,
+            num_files,
             train_len,
             max_len,
             year_start_idx,
@@ -100,11 +106,11 @@ if __name__ == "__main__":
         )
 
         train_dataloader = DataLoader(
-            train_dataset, batch_size=cfg.train.batch_size * cfg.k, shuffle=True
+            train_dataset, batch_size=cfg.train.batch_size * num_files, shuffle=True
         )
 
         if args.discrete:
-            if cfg.model == "edt":
+            if args.model == "edt":
                 model = DiscreteEDT(
                     state_size, action_size, cfg.train.hidden_size, 3, 1, False
                 )
@@ -112,7 +118,7 @@ if __name__ == "__main__":
                 model = DiscreteDT(state_size, action_size, cfg.train.hidden_size)
 
         else:
-            if cfg.model == "edt":
+            if args.model == "edt":
                 model = ElasticDecisionTransformer(
                     state_size, action_size, cfg.train.hidden_size, 3, 1, True
                 )
@@ -122,23 +128,29 @@ if __name__ == "__main__":
                 )
 
         if test_year == cfg.year_range[0] + 1:
-            if not os.path.exists(f"ckpts/{cfg.model}/{cfg.expr}_model_weights"):
-                os.makedirs(f"ckpts/{cfg.model}/{cfg.expr}_model_weights")
+            if not os.path.exists(f"{folder_name}/{args.expr}_model_weights"):
+                os.makedirs(f"{folder_name}/{args.expr}_model_weights")
+            else:
+                rp("Folder already exists")
 
             torch.save(
                 model.state_dict(),
-                f"ckpts/{cfg.model}/{cfg.expr}_model_weights/original.pth",
+                f"{folder_name}/{args.expr}_model_weights/original.pth",
             )
 
+        optimizer = optim.AdamW(model.parameters(), **cfg.opt)
         scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer=optim.AdamW(model.parameters(), **cfg.opt),
+            optimizer=optimizer,
             lr_lambda=lambda steps: min((steps + 1) / cfg.warmup_steps, 1),
         )
 
         trainer = Trainer(
             test_year,
             model,
+            optimizer,
+            scheduler,
             max_len,
+            folder_name,
             cfg.expr,
             cfg.model,
             is_elastic=True if cfg.model == "edt" else False,
@@ -149,7 +161,6 @@ if __name__ == "__main__":
                 cfg.train.epochs,
                 train_dataloader,
                 DEVICE,
-                cfg.opt,
                 expectile=0.99,
                 state_loss_weight=1.0,
                 exp_loss_weight=0.5,
@@ -157,7 +168,7 @@ if __name__ == "__main__":
             )
 
         elif cfg.mode == "test":
-            DEVICE = "cpu"
+            model.to(DEVICE)
             s_test = s_test.to(DEVICE)
             norm_s_test = norm_s_test.to(DEVICE)
             first_20 = norm_s_test[0]
@@ -180,7 +191,6 @@ if __name__ == "__main__":
             if cfg.model == "edt":
                 trainer.edt_test(
                     DEVICE,
-                    cfg.expr,
                     state_size,
                     action_size,
                     single_state,
@@ -191,7 +201,6 @@ if __name__ == "__main__":
             else:
                 trainer.dt_test(
                     DEVICE,
-                    cfg.expr,
                     state_size,
                     action_size,
                     single_state,

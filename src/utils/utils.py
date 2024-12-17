@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Union
+from typing import Dict, Tuple, List, Union, Optional
 
 from omegaconf import ListConfig, OmegaConf, DictConfig
 import numpy as np
@@ -64,12 +64,17 @@ def binary_transfer(act: torch.Tensor) -> torch.Tensor:
     return indices
 
 
-def min_max_norm(x: np.ndarray) -> np.ndarray:
+def min_max_norm(x: np.ndarray, state_with_vol: bool) -> np.ndarray:
     """
     min-max normalization for 3-dim matrix
 
     keep the shape of min, max as (n, 20, 1)
     """
+    if state_with_vol:
+        vol = x[:, :, -1]
+        x = x[:, :, :-1]
+
+    vol = None
     normed_array = np.zeros_like(x)
 
     for strat in range(x.shape[0]):
@@ -77,7 +82,12 @@ def min_max_norm(x: np.ndarray) -> np.ndarray:
         max_val = np.max(x[strat], axis=1, keepdims=True)
         normed_array[strat] = (x[strat] - min_val) / (max_val - min_val)
 
-    return normed_array
+    if state_with_vol and vol is not None:
+        vol = np.expand_dims(vol, axis=-1)
+        concat_array = np.concatenate([normed_array, vol], axis=-1)
+        return concat_array
+    else:
+        return normed_array
 
 
 def expectile_loss(diff: torch.Tensor, expectile: float = 0.99) -> torch.Tensor:
@@ -106,13 +116,13 @@ def count_return_to_go(returns: np.ndarray, gamma: float) -> np.ndarray:
 
 def compute_dr(
     close_today,
-    close_tomorrow: float,
-    action_today: np.ndarray,
+    close_tomorrow: torch.Tensor,
+    action_today: torch.Tensor,
     have_position: bool,
     prev_act: int | None,
     trans_cost: float = 0.001,
     portfolio_value: float = 1000000,
-) -> float:
+) -> Tuple[float, bool, Optional[int]]:
     """
     compute daily return
 
@@ -123,7 +133,8 @@ def compute_dr(
     - close_tomorrow: float
     - action_today: (4,) vector [buy, sell, buytocover, short]
     """
-    action = np.argmax(action_today.cpu().numpy())
+    action = int(np.argmax(action_today.cpu().numpy()))
+    dr, prev_act = 0, None
 
     if isinstance(close_today, torch.Tensor):
         close_today = close_today.cpu().numpy()
@@ -154,8 +165,6 @@ def compute_dr(
 
         prev_act = action
 
-        return dr, have_position, prev_act
-
     if have_position is True:
         if prev_act == 0:
             if action in [0, 2]:
@@ -179,7 +188,7 @@ def compute_dr(
                 prev_act = action
                 dr = 0
 
-        return dr, have_position, prev_act
+    return dr, have_position, prev_act
 
 
 def get_start_year_idx(year_list: List[int], timesteps: np.ndarray) -> Dict[int, int]:
@@ -198,11 +207,11 @@ def get_start_year_idx(year_list: List[int], timesteps: np.ndarray) -> Dict[int,
 
 
 def get_slicev2(
-    data: List[Union[np.ndarray, torch.Tensor]],
+    data: List[torch.Tensor],
     num_strats: int,
     start: int = 0,
-    end: int | None = None,
-) -> List[Union[np.ndarray, torch.Tensor]]:
+    end: Optional[int] = None,
+) -> List[torch.Tensor]:
     """
     slice the data into length of training
 
@@ -220,14 +229,14 @@ def get_slicev2(
 
 
 def get_test_slicev2(
-    data: List[Union[np.ndarray, torch.Tensor]],
+    data: List[torch.Tensor],
     num_strats: int,
     train_len: int,
     max_len: int,
-    year_start_idx: int,
+    year_start_idx: Dict[int, int],
     test_year: int,
-    year_list: List[str],
-) -> List[Union[np.ndarray, torch.Tensor]]:
+    year_list: List[int],
+) -> List[torch.Tensor]:
     """
     slice the data into length of testing
 

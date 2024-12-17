@@ -56,7 +56,7 @@ class PrepareDataset:
 
         return action, returns, trade_timestep
 
-    def store_action(self, action: List[Dict[str, List[int]]]) -> np.array:
+    def store_action(self, action: List[Dict[str, List[int]]]) -> np.ndarray:
         """
         Store action data to numpy array
         """
@@ -76,7 +76,7 @@ class PrepareDataset:
         return_array[len(self.state_data) - len(returns) :] = returns
         return return_array
 
-    def padding(self, trajectory: Dict[str, np.array]) -> Dict[str, np.ndarray]:
+    def padding(self, trajectory: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """
         pad the trajectory to recorded timestep
         """

@@ -59,7 +59,7 @@ class DataPreprocess:
         next_state_set: Optional[np.ndarray],
         action_set: np.ndarray,
         return_set: np.ndarray,
-    ) -> Tuple[torch.Tensor]:
+    ) -> Tuple[torch.Tensor, ...]:
         """
         Split the full data into subsets based on the length of the sequence (self.max_len)
 
@@ -139,6 +139,8 @@ class DataPreprocess:
             ns = torch.from_numpy(np.concatenate(ns, axis=0)).to(
                 dtype=torch.float32, device=self.device
             )
+        else:
+            ns = torch.tensor([])
 
         a = torch.from_numpy(np.concatenate(a, axis=0)).to(
             dtype=torch.float32, device=self.device
