@@ -1,10 +1,6 @@
 state_with_vol: false
-model: edt
-mode: train
-device: 3
+env_data: "env_data/sp500_volpct.csv"
 seed_number: 42
-expr: synthetic_all_rsi
-k: 17
 heuristic_search: false
 year_range:
   - 2010

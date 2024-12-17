@@ -69,7 +69,7 @@ def return_search(
     rs_steps: int = 2,
     rs_ratio: float = 1.0,
     real_rtg: bool = False,
-) -> Tuple[Optional[torch.Tensor], int]:
+) -> Tuple[torch.Tensor, int]:
     """
     Search for the T for maximizing the return to go
 
@@ -93,7 +93,7 @@ def return_search(
         context_len - best_i: (int) --> the index of the best action
     """
     # B x T x 1?
-    highest_ret, best_i, best_act = -999, 0, None
+    highest_ret, best_i, best_act = -999, 0, torch.Tensor([])
 
     if t < context_len:
         for i in range(0, math.ceil((t + 1) / rs_ratio), rs_steps):
@@ -203,9 +203,9 @@ def return_search_heuristic(
     real_rtg: bool = False,
     heuristic_delta: int = 1,
     previous_index: Optional[int] = None,
-) -> Tuple[Optional[torch.Tensor], int]:
+) -> Tuple[torch.Tensor, int]:
     # B x T x 1?
-    highest_ret, best_i, best_act = -999, 0, None
+    highest_ret, best_i, best_act = -999, 0, torch.Tensor([])
 
     if t < context_len:
         for i in range(0, math.ceil((t + 1) / rs_ratio), rs_steps):

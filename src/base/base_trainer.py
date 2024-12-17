@@ -1,9 +1,8 @@
 from abc import abstractmethod
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Any
 
 import torch
 import torch.optim as optim
-from omegaconf import OmegaConf, DictConfig
 from rich.progress import track
 from torch.utils.data import DataLoader
 
@@ -20,14 +19,20 @@ class BaseTrainer:
         self,
         year: int,
         model: torch.nn.Module,
+        optimizer: optim.Optimizer,
+        scheduler: Optional[Any],
         max_len: int,
+        folder_name: str,
         expr_name: str,
         model_type: str,
         is_elastic: bool,
     ) -> None:
         self.year = year
         self.model = model
+        self.optimizer = optimizer
+        self.scheduler = scheduler
         self.max_len = max_len
+        self.folder_name = folder_name
         self.expr_name = expr_name
         self.model_type = model_type
         self.is_elastic = is_elastic
@@ -39,7 +44,6 @@ class BaseTrainer:
         device: str,
         total_sample: int,
         total_loss: float,
-        optimizer: torch.optim.Optimizer,
     ):
         raise NotImplementedError
 
@@ -50,7 +54,6 @@ class BaseTrainer:
         device: str,
         total_sample: int,
         total_loss: float,
-        optimizer: torch.optim.Optimizer,
         expectile: float,
         state_loss_weight: float,
         exp_loss_weight: float,
@@ -63,7 +66,6 @@ class BaseTrainer:
         epochs: int,
         tr_loader: DataLoader,
         device: str,
-        opt_cfg: DictConfig,
         **kwargs,
     ) -> None:
         """
@@ -76,16 +78,14 @@ class BaseTrainer:
             - return_to_go_batch: torch.Tensor with shape (B, T)
             - mask_batch: torch.Tensor with shape (B, T)
         """
-        cfg: Dict[str, Any] = OmegaConf.to_container(opt_cfg, resolve=True)
 
         self.model.load_state_dict(
             torch.load(
-                f"ckpts/{self.model_type}/{self.expr_name}_model_weights/original.pth"
+                f"{self.folder_name}/{self.expr_name}_model_weights/original.pth"
             )
         )
         self.model.to(device)
         self.model.train()
-        optimizer = optim.AdamW(self.model.parameters(), **cfg)
 
         for epoch in track(range(epochs)):
             total_sample, total_loss = 0, 0
@@ -93,13 +93,19 @@ class BaseTrainer:
             for data in tr_loader:
                 if self.is_elastic:
                     total_loss, total_sample = self.edt_train(
-                        data, device, total_sample, total_loss, optimizer, **kwargs
+                        data, device, total_sample, total_loss, **kwargs
                     )
 
                 else:
                     total_loss, total_sample = self.dt_train(
-                        data, device, total_sample, total_loss, optimizer
+                        data,
+                        device,
+                        total_sample,
+                        total_loss,
                     )
+
+                if self.scheduler is not None:
+                    self.scheduler.step()
 
             if (epoch + 1) % 10 == 0:
                 epoch_loss = total_loss / total_sample
@@ -108,14 +114,13 @@ class BaseTrainer:
             if (epoch + 1) % 50 == 0:
                 torch.save(
                     self.model.state_dict(),
-                    f"ckpts/{self.model_type}/{self.expr_name}_model_weights/{self.year}_len{self.max_len}.pth",
+                    f"{self.folder_name}/{self.expr_name}_model_weights/{self.year}_len{self.max_len}.pth",
                 )
 
     @abstractmethod
     def dt_test(
         self,
         device: str,
-        expr_name: str,
         state_size: int,
         action_size: int,
         state_test: torch.Tensor,
@@ -127,7 +132,6 @@ class BaseTrainer:
     def edt_test(
         self,
         device: str,
-        expr_name: str,
         state_size: int,
         action_size: int,
         state_test: torch.Tensor,
@@ -147,12 +151,12 @@ class BaseTrainer:
 
     def test(
         self,
-        device: str,
-        state_size: int,
-        action_size: int,
-        state_test: torch.Tensor,
-        state_test_denorm: Optional[torch.Tensor] = None,
-        rtg_target: int = 1,
-        **kwargs,
+        # device: str,
+        # state_size: int,
+        # action_size: int,
+        # state_test: torch.Tensor,
+        # state_test_denorm: Optional[torch.Tensor] = None,
+        # rtg_target: int = 1,
+        # **kwargs,
     ) -> None:
         raise NotImplementedError

@@ -19,9 +19,7 @@ class DiscreteDT(BaseDecisionTransformer):
 
     def __init__(self, state_size, action_size, hidden_size) -> None:
         super().__init__(state_size, action_size, hidden_size)
-        # self.embed_action = nn.Linear(self.action_size, self.hidden_size)
         self.embed_action = nn.Sequential(
-            # nn.Embedding(2 ** self.action_size, self.hidden_size),
             nn.Embedding(5, self.hidden_size),
             nn.Tanh(),
         )
@@ -54,14 +52,13 @@ class DiscreteDT(BaseDecisionTransformer):
                 state.device
             )
 
-        # time_embeddings = self.embed_timestep(timesteps.squeeze(-1))
         time_embeddings = self.embed_timestep(
             timesteps
         )  # (batch_size, seq_length, hidden_size)
         state_embeddings = (
             self.embed_state(state) + time_embeddings
         )  # (batch_size, seq_length, hidden_size)
-        action = binary_transfer(action)
+        action = binary_transfer(action).to(state.device)
         action_embeddings = (
             self.embed_action(action) + time_embeddings
         )  # (batch_size, seq_length, hidden_size)
@@ -149,7 +146,6 @@ class DiscreteEDT(BaseDecisionTransformer):
         self.num_inputs = num_inputs
         self.is_continuous = is_continuous
 
-        # self.embed_action = torch.nn.Embedding(action_size, hidden_size)
         self.embed_action = torch.nn.Embedding(5, hidden_size)
         self.predict_state = nn.Linear(
             self.hidden_size + self.action_size, self.state_size
@@ -179,7 +175,7 @@ class DiscreteEDT(BaseDecisionTransformer):
                 state.device
             )
 
-        action = binary_transfer(action)
+        action = binary_transfer(action).to(state.device)
         time_embeddings = self.embed_timestep(timesteps)
         state_embeddings = self.embed_state(state) + time_embeddings
         action_embeddings = self.embed_action(action) + time_embeddings
@@ -237,11 +233,9 @@ class DiscreteEDT(BaseDecisionTransformer):
         state = state.reshape(1, -1, self.state_size)
         action = action.reshape(1, -1, self.action_size)
         timesteps = timesteps.reshape(1, -1)
-        # return_to_go = return_to_go.reshape(1, -1)
         attention_mask = None
         _, action_pred, ret_pred, imp_ret_pred, _ = self.forward(
             state, action, timesteps, return_to_go, attention_mask=attention_mask
         )
 
-        # return action_pred[0, -1], ret_pred.squeeze(-1), imp_ret_pred.squeeze(-1)
         return action_pred[0, -1], ret_pred, imp_ret_pred
